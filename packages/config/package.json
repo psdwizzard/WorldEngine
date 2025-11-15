@@ -1,0 +1,20 @@
+{
+    "name":  "@worldengine/config",
+    "version":  "0.1.0",
+    "private":  true,
+    "type":  "module",
+    "exports":  {
+                    "./eslint/react":  "./eslint/react.cjs",
+                    "./eslint/node":  "./eslint/node.cjs",
+                    "./prettier":  "./prettier.config.cjs",
+                    "./tsconfig/base":  "./tsconfig/base.json",
+                    "./tsconfig/react":  "./tsconfig/react.json",
+                    "./tsconfig/node":  "./tsconfig/node.json"
+                },
+    "scripts":  {
+                    "lint":  "echo \"Skipping lint for @worldengine/config\"",
+                    "test":  "echo \"Skipping tests for @worldengine/config\"",
+                    "typecheck":  "echo \"Skipping typecheck for @worldengine/config\"",
+                    "format":  "echo \"Skipping format for @worldengine/config\""
+                }
+}

@@ -1,0 +1,11 @@
+﻿{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./packages/config/tsconfig/base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@worldengine/shared": ["packages/shared/src/index.ts"],
+      "@worldengine/shared/*": ["packages/shared/src/*"]
+    }
+  }
+}

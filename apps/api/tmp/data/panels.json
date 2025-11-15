@@ -1,0 +1,76 @@
+{
+  "pages": [
+    {
+      "id": "9f674c39-bee8-4fac-832f-4cab25917b61",
+      "label": "Page 1",
+      "width": 1,
+      "height": 1,
+      "panels": [
+        {
+          "id": "3179e9eb-3133-4bc6-b25b-661d012c9d6a",
+          "pageId": "9f674c39-bee8-4fac-832f-4cab25917b61",
+          "label": "Panel 1",
+          "prompt": "",
+          "order": 0,
+          "geometry": {
+            "x": 0.05,
+            "y": 0.05,
+            "width": 0.4,
+            "height": 0.4
+          },
+          "createdAt": "2025-09-23T00:01:26.226Z",
+          "updatedAt": "2025-09-23T00:27:15.890Z"
+        },
+        {
+          "id": "cbe77e56-6f8e-4020-8765-b5e8d69f8dd5",
+          "pageId": "9f674c39-bee8-4fac-832f-4cab25917b61",
+          "label": "Panel 2",
+          "prompt": "",
+          "order": 1,
+          "geometry": {
+            "x": 0.55,
+            "y": 0.05,
+            "width": 0.4,
+            "height": 0.4
+          },
+          "createdAt": "2025-09-23T00:01:26.226Z",
+          "updatedAt": "2025-09-23T00:27:15.890Z"
+        },
+        {
+          "id": "d48f8694-b026-4d67-88ef-ba96a5cacb41",
+          "pageId": "9f674c39-bee8-4fac-832f-4cab25917b61",
+          "label": "Panel 3",
+          "prompt": "",
+          "order": 2,
+          "geometry": {
+            "x": 0.05,
+            "y": 0.5,
+            "width": 0.9,
+            "height": 0.4
+          },
+          "createdAt": "2025-09-23T00:01:26.226Z",
+          "updatedAt": "2025-09-23T00:27:15.890Z"
+        },
+        {
+          "id": "4e063ff0-7d00-42df-9943-ed0170150139",
+          "pageId": "9f674c39-bee8-4fac-832f-4cab25917b61",
+          "label": "Panel 4",
+          "prompt": "",
+          "order": 3,
+          "geometry": {
+            "x": 0.6,
+            "y": 0.5,
+            "width": 0.3,
+            "height": 0.3
+          },
+          "createdAt": "2025-09-23T00:27:15.890Z",
+          "updatedAt": "2025-09-23T00:27:15.890Z"
+        }
+      ],
+      "createdAt": "2025-09-23T00:01:26.226Z",
+      "updatedAt": "2025-09-23T00:27:15.890Z"
+    }
+  ],
+  "activePageId": "9f674c39-bee8-4fac-832f-4cab25917b61",
+  "updatedAt": "2025-09-23T00:27:15.890Z"
+}

@@ -1,0 +1,32 @@
+{
+    "name":  "worldengine",
+    "version":  "0.1.0",
+    "private":  true,
+    "description":  "World Generator monorepo for comic panel creation via Gemini 2.5",
+    "license":  "MIT",
+    "packageManager":  "npm@10.8.1",
+    "engines":  {
+                    "node":  "\u003e=20.0.0"
+                },
+    "type":  "module",
+    "workspaces":  [
+                       "apps/*",
+                       "packages/*"
+                   ],
+    "scripts":  {
+                    "dev":  "concurrently \"npm run dev:web\" \"npm run dev:api\"",
+                    "dev:web":  "npm --workspace @worldengine/web run dev",
+                    "dev:api":  "npm --workspace @worldengine/api run dev",
+                    "build":  "npm run build:web \u0026\u0026 npm run build:api",
+                    "build:web":  "npm --workspace @worldengine/web run build",
+                    "build:api":  "npm --workspace @worldengine/api run build",
+                    "lint":  "npm --workspaces run lint",
+                    "test":  "npm --workspaces run test",
+                    "typecheck":  "npm --workspaces run typecheck",
+                    "format":  "npm --workspaces run format"
+                },
+    "devDependencies":  {
+                            "concurrently":  "^9.1.2"
+                        },
+    "pretypecheck":  "npm --workspace @worldengine/shared run build"
+}
