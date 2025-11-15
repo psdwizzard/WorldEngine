@@ -30,6 +30,13 @@ import {
   uploadLocationReference,
   updateProject,
   type CharacterPayload,
+  listCharactersForProject,
+  listLocationsForProject,
+  listItemsForProject,
+  deleteCharacter,
+  renameCharacter,
+  generateLocationView,
+  generateLocationFromImage,
 } from "./lib/api";
 import "./App.css";
 
@@ -119,7 +126,7 @@ function resizeGeometry(origin: PanelGeometry, dx: number, dy: number, corner: R
   };
 }
 
-type TabKey =  "characters" | "locations" | "items" | "panels" | "settings";
+type TabKey = "characters" | "project-assets" | "locations" | "items" | "panels" | "settings";
 
 type TabDescriptor = {
   key: TabKey;
@@ -135,11 +142,16 @@ type UploadState = {
   assetId?: string;
 };
 
-const TABS: TabDescriptor[] = [
+  const TABS: TabDescriptor[] = [
   {
     key: "characters",
     label: "Characters",
     description: "Organize front views and custom slots for each character.",
+  },
+  {
+    key: "project-assets",
+    label: "Project Assets",
+    description: "Browse characters, locations, items, and storyboard pages for the active project.",
   },
   {
     key: "locations",
@@ -222,6 +234,14 @@ export function App() {
   }, [refreshProjects]);
 
   useEffect(() => {
+    // If a project slug is saved but no id, reconcile by slug
+    if (settings.projectSlug && !settings.projectId && projectsStatus === "ready") {
+      const match = projects.find((p) => p.slug === settings.projectSlug);
+      if (match) {
+        updateSetting("projectId", match.id);
+      }
+    }
+
     if (!settings.projectSlug && projectsStatus === "ready" && projects.length > 0) {
       const [first] = projects;
       if (!first) return;
@@ -278,6 +298,24 @@ export function App() {
           <span className="brand-title">World Generator</span>
           <span className="brand-subtitle">Gemini 2.5 Flash comic pre-production toolkit</span>
         </div>
+        <div className="app-header-controls">
+          <div className="field header-project-picker">
+            <label htmlFor="header-project-picker">Project</label>
+            <select
+              id="header-project-picker"
+              value={settings.projectId ?? ""}
+              onChange={(event) => handleProjectSelect(event.target.value)}
+              disabled={projectsStatus === "loading" || projects.length === 0}
+            >
+              <option value="">-- Select project --</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
       </header>
 
       <main className="app-main">
@@ -298,6 +336,9 @@ export function App() {
         <section className="tab-content" aria-live="polite">
           {activeDescriptor.key === "characters" && (
             <CharactersTab settingsController={settingsController} />
+          )}
+          {activeDescriptor.key === "project-assets" && (
+            <ProjectAssetsTab settingsController={settingsController} />
           )}
           {activeDescriptor.key === "locations" && (
             <LocationsTab settingsController={settingsController} />
@@ -536,6 +577,15 @@ function CharactersTab({
               </a>
             )}
           </div>
+          {frontAsset && (
+            <div className="capture-preview">
+              <img
+                src={assetHref(frontAsset.url)}
+                alt={`Front view of ${ensureName()}`}
+                className="asset-preview"
+              />
+            </div>
+          )}
           <p className={`upload-status status-${frontUploadState.status}`}>
             {frontUploadState.message ?? (frontAsset ? "Front view ready" : "Awaiting upload")}
           </p>
@@ -603,7 +653,7 @@ function CharactersTab({
         <h3>Saved references</h3>
         {slotsWithAssets.length === 0 ? (
           <p className="helper-text">Front, left, right, and back angles will appear here after generation.</p>
-        ) : (
+          ) : (
           <div className="panel-grid">
             {slotsWithAssets.map((slot) => {
               const asset = slot.asset;
@@ -614,8 +664,13 @@ function CharactersTab({
                     <span className="capture-heading">{slot.label}</span>
                     <span className="capture-metadata">{describeAngle(slot.angle)}</span>
                   </div>
+                  <img
+                    className="asset-preview"
+                    src={assetHref(asset.url)}
+                    alt={`${slot.label} – ${describeAngle(slot.angle)}`}
+                  />
                   <a className="asset-link" href={assetHref(asset.url)} target="_blank" rel="noreferrer">
-                    View asset
+                    Open full size
                   </a>
                   <p className="helper-text">
                     Asset ID: <code>{asset.id.slice(0, 8)}...</code>
@@ -638,6 +693,13 @@ function CharactersTab({
   const [locationName, setLocationName] = useState("Untitled Location");
   const [spotLabel, setSpotLabel] = useState("");
   const [uploadState, setUploadState] = useState<UploadState>({ status: "idle" });
+  const [viewLabel, setViewLabel] = useState("");
+  const [viewPrompt, setViewPrompt] = useState("");
+  const [generateState, setGenerateState] = useState<UploadState>({ status: "idle" });
+  const [genLocationName, setGenLocationName] = useState("");
+  const [genLocationPrompt, setGenLocationPrompt] = useState("");
+  const [createAsNewLocation, setCreateAsNewLocation] = useState(false);
+  const [imageGenState, setImageGenState] = useState<UploadState>({ status: "idle" });
 
   useEffect(() => {
     if (location) {
@@ -672,6 +734,100 @@ function CharactersTab({
       setUploadState({ status: "error", message });
     } finally {
       event.target.value = "";
+    }
+  };
+
+  const handleGenerateView = async () => {
+    const trimmedLabel = viewLabel.trim();
+    const trimmedPrompt = viewPrompt.trim();
+    if (!trimmedLabel || !trimmedPrompt) {
+      setGenerateState({ status: "error", message: "Add a view label and prompt" });
+      return;
+    }
+
+    setGenerateState({ status: "uploading", message: `Generating "${trimmedLabel}"` });
+
+    try {
+      const response = await generateLocationView({
+        locationId: location?.id,
+        name: locationName,
+        label: trimmedLabel,
+        prompt: trimmedPrompt,
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+
+      setLocation(response.location);
+      setGenerateState({
+        status: "success",
+        message: "View generated",
+        assetId: response.assetId ?? undefined,
+      });
+      setViewPrompt("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to generate view";
+      setGenerateState({ status: "error", message });
+    }
+  };
+
+  const handleGenerateFromImage = async () => {
+    const trimmedName = genLocationName.trim();
+    const trimmedPrompt = genLocationPrompt.trim();
+
+    if (!trimmedPrompt) {
+      setImageGenState({ status: "error", message: "Add a prompt describing the new view" });
+      return;
+    }
+
+    if (!location?.primaryAssetId) {
+      setImageGenState({ status: "error", message: "Upload a reference image first" });
+      return;
+    }
+
+    if (createAsNewLocation && !trimmedName) {
+      setImageGenState({ status: "error", message: "Provide a name for the new location" });
+      return;
+    }
+
+    setImageGenState({
+      status: "uploading",
+      message: createAsNewLocation ? `Creating new location "${trimmedName}"` : "Generating view",
+    });
+
+    try {
+      // We'll create this API function next
+      const response = await generateLocationFromImage({
+        sourceLocationId: location.id,
+        sourceAssetId: location.primaryAssetId,
+        prompt: trimmedPrompt,
+        createAsNew: createAsNewLocation,
+        newLocationName: createAsNewLocation ? trimmedName : undefined,
+        spotLabel: !createAsNewLocation ? trimmedName : undefined,
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+
+      if (createAsNewLocation) {
+        // New location created, we could optionally switch to it
+        setImageGenState({
+          status: "success",
+          message: `New location "${response.location.name}" created`,
+        });
+        // Optionally clear form
+        setGenLocationName("");
+        setGenLocationPrompt("");
+      } else {
+        // Added as a spot to current location
+        setLocation(response.location);
+        setImageGenState({
+          status: "success",
+          message: "New view added to current location",
+        });
+        setGenLocationPrompt("");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to generate from image";
+      setImageGenState({ status: "error", message });
     }
   };
 
@@ -716,6 +872,67 @@ function CharactersTab({
           {uploadState.assetId ? ` � Asset ${uploadState.assetId.slice(0, 8)}` : ""}
         </p>
       </div>
+
+      {location?.primaryAssetId && (
+        <div className="form-card">
+          <h3>Generate from uploaded image</h3>
+          <p>
+            Use the uploaded image as a visual reference to generate variations with AI. You can create a
+            new location or add a secondary view to the current location.
+          </p>
+          <div className="field">
+            <label htmlFor="gen-location-name">Name / Label</label>
+            <input
+              id="gen-location-name"
+              type="text"
+              placeholder={createAsNewLocation ? "New Kitchen View" : "Counter view"}
+              value={genLocationName}
+              onChange={(event) => setGenLocationName(event.target.value)}
+            />
+            <p className="helper-text">
+              {createAsNewLocation
+                ? "Name for the new location"
+                : "Label for the secondary view (optional)"}
+            </p>
+          </div>
+          <div className="field">
+            <label htmlFor="gen-location-prompt">Generation prompt</label>
+            <textarea
+              id="gen-location-prompt"
+              rows={4}
+              placeholder="A close-up view of the shop as if you were sitting at the counter looking into the kitchen, please keep the style and lighting the same"
+              value={genLocationPrompt}
+              onChange={(event) => setGenLocationPrompt(event.target.value)}
+            />
+            <p className="helper-text">
+              Describe the variation you want to generate based on the uploaded image.
+            </p>
+          </div>
+          <div className="field">
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={createAsNewLocation}
+                onChange={(event) => setCreateAsNewLocation(event.target.checked)}
+              />
+              Create as new location
+            </label>
+            <p className="helper-text">
+              {createAsNewLocation
+                ? "Generate a new independent location based on this image"
+                : "Add as a secondary spot/view to the current location"}
+            </p>
+          </div>
+          <div className="settings-actions">
+            <button type="button" className="primary" onClick={handleGenerateFromImage}>
+              Generate {createAsNewLocation ? "New Location" : "View"}
+            </button>
+          </div>
+          <p className={`upload-status status-${imageGenState.status}`}>
+            {imageGenState.message ?? "Ready to generate"}
+          </p>
+        </div>
+      )}
 
       {location && (
         <div className="form-card">
@@ -863,6 +1080,772 @@ function ItemsTab({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function ProjectAssetsTab({
+  settingsController,
+}: {
+  settingsController: SettingsController;
+}) {
+  const { settings } = settingsController;
+  const [characters, setCharacters] = useState<CharacterView[]>([]);
+  const [locations, setLocations] = useState<LocationBlueprint[]>([]);
+  const [items, setItems] = useState<ItemReference[]>([]);
+  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [selectedCharacter, setSelectedCharacter] = useState<CharacterView | null>(null);
+  const [selectedLocation, setSelectedLocation] = useState<LocationBlueprint | null>(null);
+  const [selectedItem, setSelectedItem] = useState<ItemReference | null>(null);
+  const [deletingId, setDeletingId] = useState<UUID | null>(null);
+  const [uploadingAngle, setUploadingAngle] = useState<CharacterAngle | null>(null);
+  const [renamingId, setRenamingId] = useState<UUID | null>(null);
+  const [renamingAngle, setRenamingAngle] = useState<CharacterAngle | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("loading");
+    setError(null);
+
+    Promise.all([
+      listCharactersForProject({
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+        projectId: settings.projectId ?? undefined,
+      }),
+      listLocationsForProject({
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      }),
+      listItemsForProject({
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      }),
+    ])
+      .then(([characterItems, locationItems, itemItems]) => {
+        if (cancelled) return;
+        setCharacters(characterItems);
+        setLocations(locationItems);
+        setItems(itemItems);
+        setStatus("ready");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setStatus("error");
+        setError(err instanceof Error ? err.message : "Failed to load assets");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.geminiKey, settings.projectId, settings.projectSlug]);
+
+  const hasProject = Boolean(settings.projectId || settings.projectSlug);
+
+  const handleViewCharacter = (character: CharacterView) => {
+    setSelectedCharacter(character);
+  };
+
+  const handleDeleteCharacter = async (character: CharacterView) => {
+    if (!window.confirm(`Delete character "${character.name}" from this project? This cannot be undone.`)) {
+      return;
+    }
+
+    setDeletingId(character.id);
+    try {
+      await deleteCharacter({
+        characterId: character.id,
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+        projectId: settings.projectId ?? undefined,
+      });
+      setCharacters((previous) => previous.filter((candidate) => candidate.id !== character.id));
+      setSelectedCharacter((current) => (current?.id === character.id ? null : current));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete character");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleRenameCharacter = async (character: CharacterView) => {
+    const nextName = window.prompt("Rename character", character.name);
+    if (nextName === null) return;
+    const trimmed = nextName.trim();
+    if (!trimmed || trimmed === character.name) {
+      return;
+    }
+
+    setRenamingId(character.id);
+    setError(null);
+
+    try {
+      const updated = await renameCharacter({
+        characterId: character.id,
+        name: trimmed,
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+        projectId: settings.projectId ?? undefined,
+      });
+
+      setCharacters((previous) =>
+        previous.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+      );
+      setSelectedCharacter((current) => (current && current.id === updated.id ? updated : current));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to rename character");
+    } finally {
+      setRenamingId(null);
+    }
+  };
+
+  const handleViewAsset = (assetUrl: string) => {
+    const href = assetHref(assetUrl);
+    if (!href || href === "#") return;
+    window.open(href, "_blank", "noopener");
+  };
+
+  const inferExtension = (mimeType: string | undefined) => {
+    if (!mimeType) return "png";
+    if (mimeType === "image/png") return "png";
+    if (mimeType === "image/jpeg" || mimeType === "image/jpg") return "jpg";
+    if (mimeType === "image/webp") return "webp";
+    return "png";
+  };
+
+  const handleDownloadAsset = (character: CharacterView, angle: CharacterAngle, assetUrl: string, mimeType?: string) => {
+    const href = assetHref(assetUrl);
+    if (!href || href === "#") return;
+    const link = document.createElement("a");
+    const ext = inferExtension(mimeType);
+    link.href = href;
+    link.download = `${slugifyCharacterName(character.name)}-${angle}.${ext}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleAngleUpload = async (angle: CharacterAngle, event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !selectedCharacter) return;
+
+    setUploadingAngle(angle);
+    setError(null);
+
+    try {
+      const existingSlot =
+        selectedCharacter.slots?.find((slot) => slot.angle === angle) ?? null;
+
+      const labelForSlot =
+        existingSlot && existingSlot.label && existingSlot.label.trim().length > 0
+          ? existingSlot.label
+          : formatAngleLabel(selectedCharacter.name, angle);
+
+      const slotResponse = await createCharacterSlot({
+        characterId: selectedCharacter.id,
+        name: selectedCharacter.name,
+        slotId: existingSlot?.id,
+        label: labelForSlot,
+        angle,
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+
+      const uploadResponse = await uploadCharacterAngle({
+        characterId: slotResponse.character.id,
+        name: slotResponse.character.name,
+        slotId: slotResponse.slot.id,
+        slotLabel: slotResponse.slot.label,
+        angle,
+        setDefault: angle === "front",
+        file,
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+
+      const updated = uploadResponse.character;
+      setCharacters((previous) =>
+        previous.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+      );
+      setSelectedCharacter(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to upload view");
+    } finally {
+      setUploadingAngle(null);
+    }
+  };
+
+  const handleRenameView = async (angle: CharacterAngle) => {
+    if (!selectedCharacter) return;
+
+    const angleAsset = selectedCharacter.angles?.[angle] ?? null;
+    const slot =
+      selectedCharacter.slots?.find(
+        (s) => s.asset && angleAsset && s.asset.id === angleAsset.id,
+      ) ??
+      selectedCharacter.slots?.find((s) => s.angle === angle) ??
+      null;
+
+    if (!slot) {
+      setError("Could not locate the selected view to rename.");
+      return;
+    }
+
+    const nextLabel = window.prompt("Rename view", slot.label || CHARACTER_ANGLE_LABELS[angle]);
+    if (nextLabel === null) return;
+    const trimmed = nextLabel.trim();
+    if (!trimmed || trimmed === slot.label) {
+      return;
+    }
+
+    setRenamingAngle(angle);
+    setError(null);
+
+    try {
+      const response = await createCharacterSlot({
+        characterId: selectedCharacter.id,
+        name: selectedCharacter.name,
+        slotId: slot.id,
+        label: trimmed,
+        angle,
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+
+      const updated = response.character;
+      setCharacters((previous) =>
+        previous.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+      );
+      setSelectedCharacter(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to rename view");
+    } finally {
+      setRenamingAngle(null);
+    }
+  };
+
+  const handleDeleteAngle = async (angle: CharacterAngle) => {
+    if (!selectedCharacter) return;
+    if (!selectedCharacter.slots || selectedCharacter.slots.length <= 1) {
+      setError("At least one character view is required.");
+      return;
+    }
+
+    const angleAsset = selectedCharacter.angles?.[angle] ?? null;
+    const slot =
+      selectedCharacter.slots.find((s) => s.asset && angleAsset && s.asset.id === angleAsset.id) ??
+      selectedCharacter.slots.find((s) => s.angle === angle) ??
+      null;
+
+    if (!slot) {
+      setError("Could not locate the selected view slot to delete.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Delete the ${CHARACTER_ANGLE_LABELS[angle]} view for "${selectedCharacter.name}"?`,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const updated = await deleteCharacterSlot({
+        slotId: slot.id,
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+
+      setCharacters((previous) =>
+        previous.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+      );
+      setSelectedCharacter(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete view");
+    }
+  };
+
+  return (
+    <div className="pane">
+      <h2>Project Assets</h2>
+      <p>
+        High-level view of characters, locations, items, and storyboard pages for the active project.
+        This starts with characters; locations, items, and pages will expand as those flows grow.
+      </p>
+
+      {!hasProject && (
+        <p className="helper-text">
+          Select a project in the header to see its assets.
+        </p>
+      )}
+
+      {hasProject && (
+        <>
+          <div className="form-card">
+            <div className="project-header">
+              <div>
+                <h3>Characters</h3>
+                <p className="helper-text">
+                  {status === "loading" && "Loading characters…"}
+                  {status === "error" && (error ?? "Characters unavailable")}
+                  {status === "ready" && (characters.length === 0 ? "No characters yet for this project." : `${characters.length} character(s) in this project.`)}
+                </p>
+              </div>
+            </div>
+            {status === "ready" && characters.length > 0 && (
+              <div className="panel-grid">
+                {characters.map((character) => {
+                  const defaultAngleAsset = character.angles?.front ?? null;
+                  return (
+                    <div key={character.id} className="capture-card">
+                      <div className="capture-heading-row">
+                        <span className="capture-heading">{character.name}</span>
+                      </div>
+                      {defaultAngleAsset && (
+                        <img
+                          className="asset-preview"
+                          src={assetHref(defaultAngleAsset.url)}
+                          alt={character.name}
+                        />
+                      )}
+                      <p className="helper-text">
+                        Created: {new Date(character.createdAt).toLocaleString()} • Updated:{" "}
+                        {new Date(character.updatedAt).toLocaleString()}
+                      </p>
+                      <div className="capture-actions">
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => handleViewCharacter(character)}
+                        >
+                          View
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => handleRenameCharacter(character)}
+                          disabled={renamingId === character.id}
+                        >
+                          {renamingId === character.id ? "Renaming..." : "Rename"}
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => handleDeleteCharacter(character)}
+                          disabled={deletingId === character.id}
+                        >
+                          {deletingId === character.id ? "Deleting..." : "Delete"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {selectedCharacter && (
+            <div className="form-card">
+              <div className="project-header">
+                <div>
+                  <h3>Character details</h3>
+                  <p className="helper-text">
+                    Summary for <strong>{selectedCharacter.name}</strong>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => handleRenameCharacter(selectedCharacter)}
+                  disabled={renamingId === selectedCharacter.id}
+                >
+                  {renamingId === selectedCharacter.id ? "Renaming..." : "Rename"}
+                </button>
+              </div>
+              <p className="helper-text">
+                Created: {new Date(selectedCharacter.createdAt).toLocaleString()} • Updated:{" "}
+                {new Date(selectedCharacter.updatedAt).toLocaleString()}
+              </p>
+              <p className="helper-text">
+                Manage individual views below. You can upload a new image for any angle, download existing renders, or remove extra views. Use the Characters tab for more advanced turnaround editing.
+              </p>
+              <div className="panel-grid">
+                {Object.entries(CHARACTER_ANGLE_LABELS).map(([angleKey, label]) => {
+                  const angle = angleKey as CharacterAngle;
+                  const asset = selectedCharacter.angles?.[angle] ?? null;
+                  const slotsForCharacter = selectedCharacter.slots ?? [];
+                  const slotForAngle =
+                    slotsForCharacter.find((slot) => slot.angle === angle) ??
+                    (asset
+                      ? slotsForCharacter.find(
+                          (slot) => slot.asset && slot.asset.id === asset.id,
+                        )
+                      : null);
+                  const headingLabel =
+                    slotForAngle && slotForAngle.label && slotForAngle.label.trim().length > 0
+                      ? slotForAngle.label
+                      : label;
+                  return (
+                    <div key={angle} className="capture-card">
+                      <div className="capture-heading-row">
+                        <span className="capture-heading">{headingLabel}</span>
+                      </div>
+                      {asset ? (
+                        <>
+                          <img
+                            className="asset-preview"
+                            src={assetHref(asset.url)}
+                            alt={`${selectedCharacter.name} - ${headingLabel}`}
+                            onClick={() => handleViewAsset(asset.url)}
+                          />
+                          <div className="capture-actions">
+                            <button
+                              type="button"
+                              className="ghost"
+                              onClick={() => handleRenameView(angle)}
+                              disabled={renamingAngle === angle}
+                            >
+                              {renamingAngle === angle ? "Renaming..." : "Rename"}
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost"
+                              onClick={() =>
+                                handleDownloadAsset(
+                                  selectedCharacter,
+                                  angle,
+                                  asset.url,
+                                  asset.mimeType,
+                                )
+                              }
+                            >
+                              Download
+                            </button>
+                            <label className="upload">
+                              <input
+                                type="file"
+                                hidden
+                                accept="image/*"
+                                onChange={(event) => handleAngleUpload(angle, event)}
+                              />
+                              {uploadingAngle === angle ? "Uploading..." : "Replace"}
+                            </label>
+                            <button
+                              type="button"
+                              className="ghost"
+                              onClick={() => handleDeleteAngle(angle)}
+                              disabled={
+                                uploadingAngle === angle ||
+                                !selectedCharacter.slots ||
+                                selectedCharacter.slots.length <= 1
+                              }
+                              title={
+                                selectedCharacter.slots &&
+                                selectedCharacter.slots.length <= 1
+                                  ? "At least one view is required."
+                                  : "Remove this view"
+                              }
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="capture-actions">
+                          <label className="upload">
+                            <input
+                              type="file"
+                              hidden
+                              accept="image/*"
+                              onChange={(event) => handleAngleUpload(angle, event)}
+                            />
+                            {uploadingAngle === angle ? "Uploading..." : "Add view"}
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="form-card">
+            <div className="project-header">
+              <div>
+                <h3>Locations</h3>
+                <p className="helper-text">
+                  {status === "loading" && "Loading assets…"}
+                  {status === "error" && (error ?? "Assets unavailable")}
+                  {status === "ready" &&
+                    (locations.length === 0
+                      ? "No locations yet for this workspace."
+                      : `${locations.length} location(s) in this workspace.`)}
+                </p>
+              </div>
+            </div>
+            {status === "ready" && locations.length > 0 && (
+              <div className="panel-grid">
+                {locations.map((loc) => {
+                  const primaryId = loc.primaryAssetId ?? null;
+                  const firstSpotWithAsset = (loc.spots ?? []).find((spot) => spot.referenceAssetId);
+                  const previewId = primaryId ?? firstSpotWithAsset?.referenceAssetId ?? null;
+                  const previewUrl = previewId ? assetHref(previewId) : null;
+                  const spotCount = loc.spots?.length ?? 0;
+
+                  return (
+                    <div key={loc.id} className="capture-card">
+                      <div className="capture-heading-row">
+                        <span className="capture-heading">{loc.name}</span>
+                      </div>
+                      {previewUrl && (
+                        <img
+                          className="asset-preview"
+                          src={previewUrl}
+                          alt={loc.name}
+                        />
+                      )}
+                      <p className="helper-text">
+                        {spotCount === 0
+                          ? "No secondary spots yet."
+                          : `${spotCount} secondary spot${spotCount === 1 ? "" : "s"}.`}
+                      </p>
+                      <div className="capture-actions">
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => setSelectedLocation(loc)}
+                        >
+                          View
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {selectedLocation && (
+            <div className="form-card">
+              <div className="project-header">
+                <div>
+                  <h3>Location details</h3>
+                  <p className="helper-text">
+                    Views for <strong>{selectedLocation.name}</strong>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setSelectedLocation(null)}
+                >
+                  Close
+                </button>
+              </div>
+              <p className="helper-text">
+                Created: {new Date(selectedLocation.createdAt).toLocaleString()} • Updated:{" "}
+                {new Date(selectedLocation.updatedAt).toLocaleString()}
+              </p>
+              <div className="panel-grid">
+                {/* Primary view */}
+                {selectedLocation.primaryAssetId && (
+                  <div className="capture-card">
+                    <div className="capture-heading-row">
+                      <span className="capture-heading">Primary View</span>
+                    </div>
+                    <img
+                      className="asset-preview"
+                      src={assetHref(selectedLocation.primaryAssetId)}
+                      alt={`${selectedLocation.name} - Primary`}
+                      onClick={() => handleViewAsset(selectedLocation.primaryAssetId!)}
+                    />
+                    <div className="capture-actions">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => handleViewAsset(selectedLocation.primaryAssetId!)}
+                      >
+                        Open
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {/* Secondary spots */}
+                {selectedLocation.spots?.map((spot) => (
+                  <div key={spot.id} className="capture-card">
+                    <div className="capture-heading-row">
+                      <span className="capture-heading">{spot.label}</span>
+                    </div>
+                    {spot.referenceAssetId ? (
+                      <>
+                        <img
+                          className="asset-preview"
+                          src={assetHref(spot.referenceAssetId)}
+                          alt={`${selectedLocation.name} - ${spot.label}`}
+                          onClick={() => handleViewAsset(spot.referenceAssetId!)}
+                        />
+                        <div className="capture-actions">
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() => handleViewAsset(spot.referenceAssetId!)}
+                          >
+                            Open
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="helper-text">No image for this spot yet.</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="form-card">
+            <div className="project-header">
+              <div>
+                <h3>Items</h3>
+                <p className="helper-text">
+                  {status === "loading" && "Loading assets…"}
+                  {status === "error" && (error ?? "Assets unavailable")}
+                  {status === "ready" &&
+                    (items.length === 0
+                      ? "No items yet for this workspace."
+                      : `${items.length} item(s) in this workspace.`)}
+                </p>
+              </div>
+            </div>
+            {status === "ready" && items.length > 0 && (
+              <div className="panel-grid">
+                {items.map((item) => {
+                  const primaryAsset = item.angleAssets.primary;
+                  const alternateAsset = item.angleAssets.alternate;
+                  const previewAsset = primaryAsset ?? alternateAsset;
+                  const previewUrl = previewAsset ? assetHref(previewAsset.url) : null;
+                  const angleCount = (primaryAsset ? 1 : 0) + (alternateAsset ? 1 : 0);
+
+                  return (
+                    <div key={item.id} className="capture-card">
+                      <div className="capture-heading-row">
+                        <span className="capture-heading">{item.label}</span>
+                      </div>
+                      {previewUrl && (
+                        <img
+                          className="asset-preview"
+                          src={previewUrl}
+                          alt={item.label}
+                        />
+                      )}
+                      <p className="helper-text">
+                        {angleCount === 0
+                          ? "No angles yet."
+                          : `${angleCount} angle${angleCount === 1 ? "" : "s"}.`}
+                      </p>
+                      <div className="capture-actions">
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => setSelectedItem(item)}
+                        >
+                          View
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {selectedItem && (
+            <div className="form-card">
+              <div className="project-header">
+                <div>
+                  <h3>Item details</h3>
+                  <p className="helper-text">
+                    Angles for <strong>{selectedItem.label}</strong>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setSelectedItem(null)}
+                >
+                  Close
+                </button>
+              </div>
+              <p className="helper-text">
+                Created: {new Date(selectedItem.createdAt).toLocaleString()} • Updated:{" "}
+                {new Date(selectedItem.updatedAt).toLocaleString()}
+              </p>
+              <div className="panel-grid">
+                {/* Primary angle */}
+                {selectedItem.angleAssets.primary && (
+                  <div className="capture-card">
+                    <div className="capture-heading-row">
+                      <span className="capture-heading">Primary</span>
+                    </div>
+                    <img
+                      className="asset-preview"
+                      src={assetHref(selectedItem.angleAssets.primary.url)}
+                      alt={`${selectedItem.label} - Primary`}
+                      onClick={() => handleViewAsset(selectedItem.angleAssets.primary!.url)}
+                    />
+                    <div className="capture-actions">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => handleViewAsset(selectedItem.angleAssets.primary!.url)}
+                      >
+                        Open
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {/* Alternate angle */}
+                {selectedItem.angleAssets.alternate && (
+                  <div className="capture-card">
+                    <div className="capture-heading-row">
+                      <span className="capture-heading">Alternate</span>
+                    </div>
+                    <img
+                      className="asset-preview"
+                      src={assetHref(selectedItem.angleAssets.alternate.url)}
+                      alt={`${selectedItem.label} - Alternate`}
+                      onClick={() => handleViewAsset(selectedItem.angleAssets.alternate!.url)}
+                    />
+                    <div className="capture-actions">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => handleViewAsset(selectedItem.angleAssets.alternate!.url)}
+                      >
+                        Open
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {!selectedItem.angleAssets.primary && !selectedItem.angleAssets.alternate && (
+                  <p className="helper-text">No angles uploaded yet. Use the Items tab to add references.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="form-card">
+            <h3>Storyboard Pages</h3>
+            <p className="helper-text">
+              A summary of storyboard pages and panel counts per project will land here later.
+            </p>
+          </div>
+        </>
+      )}
     </div>
   );
 }

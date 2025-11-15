@@ -12,7 +12,8 @@ import type {
 
 type HeadersInit = Record<string, string>;
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4001";
+// Default to the API dev port (4000). Env can override via VITE_API_BASE_URL.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
 
 function resolveUrl(path: string) {
   if (path.startsWith("http")) return path;
@@ -173,6 +174,68 @@ export async function deleteCharacterSlot(input: {
   return payload.character;
 }
 
+export async function deleteCharacter(input: {
+  characterId: UUID;
+  geminiKey?: string;
+  projectSlug?: string;
+  projectId?: string;
+}): Promise<void> {
+  const response = await fetch(resolveUrl(`/characters/${input.characterId}`), {
+    method: "DELETE",
+    headers: authHeader({
+      geminiKey: input.geminiKey,
+      projectSlug: input.projectSlug,
+      projectId: input.projectId,
+    }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to delete character");
+  }
+}
+
+export async function listCharactersForProject(input?: {
+  geminiKey?: string;
+  projectSlug?: string;
+  projectId?: string;
+}): Promise<CharacterPayload[]> {
+  const response = await fetch(resolveUrl("/characters"), {
+    headers: {
+      Accept: "application/json",
+      ...authHeader({ geminiKey: input?.geminiKey, projectSlug: input?.projectSlug, projectId: input?.projectId }),
+    },
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to list characters");
+  }
+
+  const payload = (await response.json()) as { characters: CharacterPayload[] };
+  return payload.characters;
+}
+
+export async function listLocationsForProject(input?: {
+  geminiKey?: string;
+  projectSlug?: string;
+}): Promise<LocationBlueprint[]> {
+  const response = await fetch(resolveUrl("/locations"), {
+    headers: {
+      Accept: "application/json",
+      ...authHeader({ geminiKey: input?.geminiKey, projectSlug: input?.projectSlug }),
+    },
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to list locations");
+  }
+
+  const payload = (await response.json()) as { locations: LocationBlueprint[] };
+  return payload.locations;
+}
+
 export interface LocationUploadResponse {
   status: string;
   location: LocationBlueprint;
@@ -210,6 +273,92 @@ export async function uploadLocationReference(input: {
   return (await response.json()) as LocationUploadResponse;
 }
 
+export async function generateLocationView(input: {
+  locationId?: UUID;
+  name?: string;
+  label: string;
+  prompt: string;
+  geminiKey?: string;
+  projectSlug?: string;
+}): Promise<{ location: LocationBlueprint; spotId: UUID | null; assetId: UUID | null }> {
+  const response = await fetch(resolveUrl("/locations/generate-view"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeader({ geminiKey: input.geminiKey, projectSlug: input.projectSlug }),
+    },
+    body: JSON.stringify({
+      locationId: input.locationId,
+      name: input.name,
+      label: input.label,
+      prompt: input.prompt,
+    }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to generate location view");
+  }
+
+  const payload = (await response.json()) as {
+    status: string;
+    location: LocationBlueprint;
+    spotId: UUID | null;
+    asset: AssetReference;
+  };
+
+  return {
+    location: payload.location,
+    spotId: payload.spotId,
+    assetId: payload.asset.id,
+  };
+}
+
+export async function generateLocationFromImage(input: {
+  sourceLocationId: UUID;
+  sourceAssetId: UUID;
+  prompt: string;
+  createAsNew: boolean;
+  newLocationName?: string;
+  spotLabel?: string;
+  geminiKey?: string;
+  projectSlug?: string;
+}): Promise<{ location: LocationBlueprint; spotId?: UUID | null; assetId: UUID | null }> {
+  const response = await fetch(resolveUrl("/locations/generate-from-image"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeader({ geminiKey: input.geminiKey, projectSlug: input.projectSlug }),
+    },
+    body: JSON.stringify({
+      sourceLocationId: input.sourceLocationId,
+      sourceAssetId: input.sourceAssetId,
+      prompt: input.prompt,
+      createAsNew: input.createAsNew,
+      newLocationName: input.newLocationName,
+      spotLabel: input.spotLabel,
+    }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to generate location from image");
+  }
+
+  const payload = (await response.json()) as {
+    status: string;
+    location: LocationBlueprint;
+    spotId?: UUID | null;
+    asset: AssetReference;
+  };
+
+  return {
+    location: payload.location,
+    spotId: payload.spotId,
+    assetId: payload.asset.id,
+  };
+}
+
 export interface ItemUploadResponse {
   status: string;
   item: ItemReference;
@@ -245,6 +394,26 @@ export async function uploadItemReference(input: {
   return (await response.json()) as ItemUploadResponse;
 }
 
+export async function listItemsForProject(input?: {
+  geminiKey?: string;
+  projectSlug?: string;
+}): Promise<ItemReference[]> {
+  const response = await fetch(resolveUrl("/items"), {
+    headers: {
+      Accept: "application/json",
+      ...authHeader({ geminiKey: input?.geminiKey, projectSlug: input?.projectSlug }),
+    },
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to list items");
+  }
+
+  const payload = (await response.json()) as { items: ItemReference[] };
+  return payload.items;
+}
+
 export async function fetchStoryboardLayout(input?: { geminiKey?: string; projectSlug?: string }): Promise<StoryboardPage> {
   const response = await fetch(resolveUrl("/panels/layout"), {
     headers: {
@@ -260,6 +429,39 @@ export async function fetchStoryboardLayout(input?: { geminiKey?: string; projec
 
   const payload = (await response.json()) as { page: StoryboardPage };
   return payload.page;
+}
+
+export async function renameCharacter(input: {
+  characterId: UUID;
+  name?: string;
+  description?: string;
+  geminiKey?: string;
+  projectSlug?: string;
+  projectId?: string;
+}): Promise<CharacterPayload> {
+  const response = await fetch(resolveUrl(`/characters/${input.characterId}`), {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeader({
+        geminiKey: input.geminiKey,
+        projectSlug: input.projectSlug,
+        projectId: input.projectId,
+      }),
+    },
+    body: JSON.stringify({
+      name: input.name,
+      description: input.description,
+    }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to rename character");
+  }
+
+  const payload = (await response.json()) as { character: CharacterPayload };
+  return payload.character;
 }
 
 export async function saveStoryboardLayout(

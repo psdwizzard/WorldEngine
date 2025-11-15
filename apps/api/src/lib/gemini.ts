@@ -6,9 +6,14 @@ import type { GeminiGenerationRequest } from "@worldengine/shared";
 let client: GoogleGenerativeAI | null = null;
 const DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image";
 
-export function getGeminiClient(env: EnvConfig) {
+export function getGeminiClient(env: EnvConfig, apiKeyOverride?: string) {
+  // If a per-request key is provided, use a non-cached client for that key.
+  if (apiKeyOverride && apiKeyOverride.trim().length > 0) {
+    return new GoogleGenerativeAI(apiKeyOverride.trim());
+  }
+
   if (!env.GEMINI_API_KEY) {
-    throw new Error("Missing GEMINI_API_KEY; set it in .env.local before generating renders.");
+    throw new Error("Missing GEMINI_API_KEY; set it in .env.local or pass x-gemini-key before generating renders.");
   }
 
   if (!client) {
@@ -20,9 +25,10 @@ export function getGeminiClient(env: EnvConfig) {
 
 export async function generateImage(
   env: EnvConfig,
-  request: GeminiGenerationRequest
+  request: GeminiGenerationRequest,
+  options?: { apiKeyOverride?: string }
 ): Promise<{ imageBuffer: Buffer; aiDescription?: string }> {
-  const client = getGeminiClient(env);
+  const client = getGeminiClient(env, options?.apiKeyOverride);
   const modelName = request.model ?? DEFAULT_IMAGE_MODEL;
   const model = client.getGenerativeModel({ model: modelName });
   const promptParts: Array<string | Part> = [request.prompt];
