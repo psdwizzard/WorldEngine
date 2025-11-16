@@ -69,6 +69,7 @@ export function useSettings() {
     setSettings((prev) => {
       const updated = { ...prev, [key]: value } as WorkspaceSettings;
       setStatus("dirty");
+      writeSettings(updated);
       return updated;
     });
   }, []);

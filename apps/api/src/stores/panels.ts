@@ -50,6 +50,7 @@ function createDefaultPage(): StoryboardPage {
       id: randomUUID(),
       pageId,
       label: "Panel 1",
+      renderAssetId: undefined,
       characterId: undefined,
       locationId: undefined,
       itemId: undefined,
@@ -64,6 +65,7 @@ function createDefaultPage(): StoryboardPage {
       id: randomUUID(),
       pageId,
       label: "Panel 2",
+      renderAssetId: undefined,
       characterId: undefined,
       locationId: undefined,
       itemId: undefined,
@@ -78,6 +80,7 @@ function createDefaultPage(): StoryboardPage {
       id: randomUUID(),
       pageId,
       label: "Panel 3",
+      renderAssetId: undefined,
       characterId: undefined,
       locationId: undefined,
       itemId: undefined,
@@ -93,8 +96,9 @@ function createDefaultPage(): StoryboardPage {
   return {
     id: pageId,
     label: "Page 1",
-    width: 1,
-    height: 1,
+    // 6.625in x 10.25in @ 300 DPI ≈ 1988 x 3075 px
+    width: 1988,
+    height: 3075,
     panels,
     createdAt,
     updatedAt: createdAt,
@@ -184,6 +188,10 @@ function mergePanel(existing: StoryboardPanel | undefined, incoming: StoryboardP
   const label = incoming.label?.trim() || existing?.label || `Panel ${index + 1}`;
   const prompt = incoming.prompt ?? existing?.prompt ?? "";
   const notes = incoming.notes ?? existing?.notes;
+  const renderAssetId = incoming.renderAssetId ?? existing?.renderAssetId;
+  const renderScale = incoming.renderScale ?? existing?.renderScale ?? 1;
+  const renderOffsetX = incoming.renderOffsetX ?? existing?.renderOffsetX ?? 0;
+  const renderOffsetY = incoming.renderOffsetY ?? existing?.renderOffsetY ?? 0;
 
   return {
     id: incoming.id,
@@ -192,6 +200,10 @@ function mergePanel(existing: StoryboardPanel | undefined, incoming: StoryboardP
     characterId: incoming.characterId ?? existing?.characterId,
     locationId: incoming.locationId ?? existing?.locationId,
     itemId: incoming.itemId ?? existing?.itemId,
+    renderAssetId,
+    renderScale,
+    renderOffsetX,
+    renderOffsetY,
     prompt,
     notes,
     order: incoming.order ?? existing?.order ?? index,
@@ -215,8 +227,9 @@ export async function saveStoryboardPage(projectSlug: string, page: StoryboardPa
   const updatedPage: StoryboardPage = {
     id: page.id,
     label: page.label?.trim() || existingPage?.label || "Page",
-    width: clamp(page.width, 0.1, 10),
-    height: clamp(page.height, 0.1, 10),
+    // Treat width/height as real page dimensions (pixels or inches), allow larger pages.
+    width: Number.isFinite(page.width) && page.width > 0 ? page.width : existingPage?.width ?? 1988,
+    height: Number.isFinite(page.height) && page.height > 0 ? page.height : existingPage?.height ?? 3075,
     panels,
     createdAt: existingPage?.createdAt ?? page.createdAt ?? now(),
     updatedAt: now(),

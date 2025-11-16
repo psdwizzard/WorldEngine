@@ -1,0 +1,19 @@
+[
+  {
+    "id": "d46264db-f484-41ad-9088-e2a945bcbfbe",
+    "name": "NoodleShop",
+    "primaryAssetId": "0a870561-85c3-4935-a6ea-15f13d3da47f",
+    "spots": [
+      {
+        "id": "04e1380d-9414-4824-a180-73f55806e544",
+        "label": "Over the conter",
+        "referenceAssetId": "a852275f-90c7-4997-b905-f8e4ab4c1da4",
+        "createdAt": "2025-11-15T23:22:49.106Z",
+        "updatedAt": "2025-11-15T23:22:49.121Z"
+      }
+    ],
+    "createdAt": "2025-11-15T23:21:36.835Z",
+    "updatedAt": "2025-11-15T23:22:49.121Z",
+    "projectSlug": "rabbit-zero"
+  }
+]

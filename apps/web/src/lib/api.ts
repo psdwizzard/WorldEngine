@@ -7,6 +7,7 @@ import type {
   ItemReference,
   LocationBlueprint,
   StoryboardPage,
+  StoryboardPanel,
   UUID,
 } from "@worldengine/shared";
 
@@ -523,6 +524,71 @@ export async function deletePanel(panelId: UUID, input?: { geminiKey?: string; p
   }
 
   return response.json();
+}
+
+export async function uploadPanelImage(input: {
+  panelId: UUID;
+  file: File;
+  geminiKey?: string;
+  projectSlug?: string;
+}): Promise<{ page: StoryboardPage; panel: StoryboardPanel; asset: AssetReference }> {
+  const formData = new FormData();
+  formData.append("image", input.file);
+
+  const response = await fetch(resolveUrl(`/panels/${input.panelId}/asset`), {
+    method: "POST",
+    body: formData,
+    headers: authHeader({ geminiKey: input.geminiKey, projectSlug: input.projectSlug }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to replace panel image");
+  }
+
+  const payload = (await response.json()) as {
+    status: string;
+    page: StoryboardPage;
+    panel: StoryboardPanel;
+    asset: AssetReference;
+  };
+
+  return { page: payload.page, panel: payload.panel, asset: payload.asset };
+}
+
+export async function renderPanelImage(input: {
+  panelId: UUID;
+  prompt: string;
+  referenceAssetId?: UUID;
+  geminiKey?: string;
+  projectSlug?: string;
+}): Promise<{ page: StoryboardPage; panel: StoryboardPanel; asset: AssetReference }> {
+  const response = await fetch(resolveUrl("/panels/render"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeader({ geminiKey: input.geminiKey, projectSlug: input.projectSlug }),
+    },
+    body: JSON.stringify({
+      panelId: input.panelId,
+      prompt: input.prompt,
+      referenceAssetId: input.referenceAssetId,
+    }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to render panel image");
+  }
+
+  const payload = (await response.json()) as {
+    status: string;
+    page: StoryboardPage;
+    panel: StoryboardPanel;
+    asset: AssetReference;
+  };
+
+  return { page: payload.page, panel: payload.panel, asset: payload.asset };
 }
 
 export async function fetchProjects(): Promise<ProjectSummary[]> {

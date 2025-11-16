@@ -211,14 +211,27 @@ The API prefers the header; if missing, it falls back to `.env.local`.
 - **Panels / Storyboard**
   - Models:
     - `StoryboardPage` – page dimensions and metadata.
-    - `StoryboardPanel` – geometry + prompt metadata.
-  - The Panels tab:
-    - Loads page layout via `GET /panels/layout`.
-    - Saves updates via `PUT /panels/layout`.
-    - Lets you:
-      - Add/remove panels.
-      - Drag/resize panels in a normalized 0–1 coordinate space.
-    - Uses prompt presets (`storyboard.panelPrompt`, `storyboard.layoutPrompt`) as the basis for downstream prompt generation.
+    - `StoryboardPanel` – geometry, prompt metadata, and per-panel framing (`renderAssetId`, `renderScale`, `renderOffsetX`, `renderOffsetY`).
+  - The Panels tab is split into two modes:
+    - **Layout**
+      - Loads page layout via `GET /panels/layout`.
+      - Saves updates via `PUT /panels/layout`.
+      - Treats the page as a comic page (6.625" × 10.25" at ~300 DPI); `width` and `height` on the page reflect print-resolution pixels.
+      - Lets you:
+        - Add/remove panels.
+        - Drag/resize panels in a normalized 0–1 coordinate space over the page.
+        - Generate panel renders via `/panels/render` using prompt presets (`storyboard.panelPrompt`, `storyboard.layoutPrompt`) and the prompt builder selections (character, location, items), with an optional reference image passed to Gemini.
+        - Double-click a panel to enter framing mode:
+          - Zoom in/out on the panel render (`renderScale`).
+          - Pan the image inside the panel mask (`renderOffsetX`, `renderOffsetY`) without cropping the underlying asset.
+        - Export the entire page as a PNG at page resolution with all panels composited and clipped to their frames.
+    - **Library**
+      - Shows a card per panel:
+        - Thumbnail of the current `renderAssetId` (or “No render yet”).
+        - Panel label and order.
+      - Actions per panel:
+        - `Download` – downloads the current panel render.
+        - `Replace` – uploads a new image for that panel via `POST /panels/:panelId/asset` without changing its geometry or framing metadata.
 
 ---
 

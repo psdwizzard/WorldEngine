@@ -70,6 +70,14 @@ export interface PanelPrompt {
   itemId?: UUID;
   prompt: string;
   notes?: string;
+  /** Optional rendered image asset for this panel. */
+  renderAssetId?: UUID;
+  /** Optional scale factor for the rendered image within the panel. */
+  renderScale?: number;
+  /** Optional horizontal offset for the rendered image within the panel (fraction of panel width). */
+  renderOffsetX?: number;
+  /** Optional vertical offset for the rendered image within the panel (fraction of panel height). */
+  renderOffsetY?: number;
   order: number;
   createdAt: string;
   updatedAt: string;
@@ -96,6 +104,8 @@ export interface StoryboardPage {
   width: number;
   height: number;
   panels: StoryboardPanel[];
+   /** Optional background color for the page (CSS color string). */
+  backgroundColor?: string;
   createdAt: string;
   updatedAt: string;
 }

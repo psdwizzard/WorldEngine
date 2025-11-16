@@ -168,6 +168,22 @@ export async function upsertCharacter(record: CharacterRecord) {
   await persistCharacters();
 }
 
+export async function deleteCharacter(id: UUID, projectSlug?: string) {
+  ensureInitialized();
+  const record = characters.get(id) ?? null;
+  if (!record) {
+    return false;
+  }
+
+  if (projectSlug && record.projectSlug !== normalizeProjectSlug(projectSlug)) {
+    return false;
+  }
+
+  characters.delete(id);
+  await persistCharacters();
+  return true;
+}
+
 export function ensureCharacter(projectSlug: string, id?: UUID, name?: string) {
   ensureInitialized();
   const normalizedSlug = normalizeProjectSlug(projectSlug);

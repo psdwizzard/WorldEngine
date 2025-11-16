@@ -37,6 +37,8 @@ import {
   renameCharacter,
   generateLocationView,
   generateLocationFromImage,
+  renderPanelImage,
+  uploadPanelImage,
 } from "./lib/api";
 import "./App.css";
 
@@ -57,7 +59,7 @@ function assetHref(pathOrId: string) {
 const MIN_PANEL_SIZE = 0.12;
 
 type ResizeCorner = "nw" | "ne" | "sw" | "se";
-type InteractionMode = "move" | "resize";
+type InteractionMode = "move" | "resize" | "image-pan";
 
 type InteractionState = {
   panelId: UUID;
@@ -66,6 +68,10 @@ type InteractionState = {
   origin: PanelGeometry;
   pointerStartX: number;
   pointerStartY: number;
+  imageOffsetX?: number;
+  imageOffsetY?: number;
+  panelWidth?: number;
+  panelHeight?: number;
 };
 
 function clampFraction(value: number, min = 0, max = 1) {
@@ -1857,17 +1863,35 @@ function PanelsTab({
 }) {
   const { settings } = settingsController;
   const [page, setPage] = useState<StoryboardPage | null>(null);
-  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "saving" | "saved" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "saving" | "saved" | "error" | "generating">(
+    "idle",
+  );
   const [error, setError] = useState<string | null>(null);
   const [selectedPanelId, setSelectedPanelId] = useState<UUID | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const interactionRef = useRef<InteractionState | null>(null);
+  const [characters, setCharacters] = useState<CharacterView[]>([]);
+  const [locations, setLocations] = useState<LocationBlueprint[]>([]);
+  const [items, setItems] = useState<ItemReference[]>([]);
+  const [characterSelection, setCharacterSelection] = useState<{ characterId?: UUID; slotId?: UUID }>({
+    characterId: undefined,
+    slotId: undefined,
+  });
+  const [locationSelection, setLocationSelection] = useState<{ locationId?: UUID; spotId?: UUID | "primary" }>({
+    locationId: undefined,
+    spotId: undefined,
+  });
+  const [selectedItemIds, setSelectedItemIds] = useState<UUID[]>([]);
+  const [autoPrompt, setAutoPrompt] = useState<string>("");
+  const [editingPanelId, setEditingPanelId] = useState<UUID | null>(null);
+  const [panelLibraryUploading, setPanelLibraryUploading] = useState<Record<UUID, boolean>>({});
+  const [subTab, setSubTab] = useState<"layout" | "library">("layout");
 
   const markDirty = useCallback(() => {
     setHasChanges(true);
     setStatus((current) => {
-      if (current === "loading" || current === "saving") {
+      if (current === "loading" || current === "saving" || current === "generating") {
         return current;
       }
       return current === "saved" ? "ready" : current;
@@ -1897,6 +1921,32 @@ function PanelsTab({
         setError(cause instanceof Error ? cause.message : "Failed to load layout");
         setStatus("error");
       });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.geminiKey, settings.projectSlug]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadLookups = async () => {
+      if (!settings.projectSlug) return;
+      try {
+        const [characterList, locationList, itemList] = await Promise.all([
+          listCharactersForProject({ geminiKey: settings.geminiKey, projectSlug: settings.projectSlug }),
+          listLocationsForProject({ geminiKey: settings.geminiKey, projectSlug: settings.projectSlug }),
+          listItemsForProject({ geminiKey: settings.geminiKey, projectSlug: settings.projectSlug }),
+        ]);
+        if (cancelled) return;
+        setCharacters(characterList);
+        setLocations(locationList);
+        setItems(itemList);
+      } catch (cause) {
+        console.error("storyboard:lookup_load_failed", cause);
+      }
+    };
+
+    void loadLookups();
 
     return () => {
       cancelled = true;
@@ -1970,9 +2020,23 @@ function PanelsTab({
       if (interaction.mode === "move") {
         const nextGeometry = moveGeometry(interaction.origin, dx, dy);
         updateGeometry(interaction.panelId, nextGeometry);
-      } else if (interaction.corner) {
+      } else if (interaction.mode === "resize" && interaction.corner) {
         const nextGeometry = resizeGeometry(interaction.origin, dx, dy, interaction.corner);
         updateGeometry(interaction.panelId, nextGeometry);
+      } else if (interaction.mode === "image-pan") {
+        const panelWidth = interaction.panelWidth || bounds.width;
+        const panelHeight = interaction.panelHeight || bounds.height;
+        if (!panelWidth || !panelHeight) return;
+        const dxPx = event.clientX - interaction.pointerStartX;
+        const dyPx = event.clientY - interaction.pointerStartY;
+        const baseOffsetX = interaction.imageOffsetX ?? 0;
+        const baseOffsetY = interaction.imageOffsetY ?? 0;
+        const offsetX = baseOffsetX + dxPx / panelWidth;
+        const offsetY = baseOffsetY + dyPx / panelHeight;
+        updatePanel(interaction.panelId, {
+          renderOffsetX: offsetX,
+          renderOffsetY: offsetY,
+        });
       }
     };
 
@@ -2004,6 +2068,82 @@ function PanelsTab({
     }, 1500);
     return () => window.clearTimeout(timeout);
   }, [status]);
+
+  const selectedPanel = useMemo(() => {
+    if (!page || !selectedPanelId) return null;
+    return page.panels.find((panel) => panel.id === selectedPanelId) ?? null;
+  }, [page, selectedPanelId]);
+
+  useEffect(() => {
+    const character =
+      characterSelection.characterId && characters.find((candidate) => candidate.id === characterSelection.characterId);
+    const characterSlot =
+      character && character.slots?.find((slot) => slot.id === characterSelection.slotId) && character.slots
+        ? character.slots.find((slot) => slot.id === characterSelection.slotId)
+        : undefined;
+
+    const location =
+      locationSelection.locationId &&
+      locations.find((candidate) => candidate.id === locationSelection.locationId);
+    let locationLabel: string | undefined;
+    if (location) {
+      if (locationSelection.spotId === "primary") {
+        locationLabel = location.name;
+      } else if (locationSelection.spotId) {
+        const spot = location.spots.find((candidate) => candidate.id === locationSelection.spotId);
+        if (spot) {
+          locationLabel = `${location.name} - ${spot.label}`;
+        }
+      }
+    }
+
+    const selectedItems = items.filter((item) => selectedItemIds.includes(item.id));
+
+    const parts: string[] = [];
+
+    if (characterSlot) {
+      parts.push(`[${characterSlot.label}]`);
+    }
+
+    if (locationLabel) {
+      if (parts.length > 0) {
+        parts.push(`is in the [${locationLabel}]`);
+      } else {
+        parts.push(`[${locationLabel}]`);
+      }
+    }
+
+    if (selectedItems.length > 0) {
+      const itemTokens = selectedItems.map((item) => `[${item.label}]`).join(", ");
+      parts.push(`with ${itemTokens}`);
+    }
+
+    let composed = parts.join(" ");
+    if (composed.length > 0) {
+      composed = `${composed}.`;
+    }
+
+    setAutoPrompt(composed);
+
+    if (!selectedPanel) {
+      return;
+    }
+
+    if (!selectedPanel.prompt || selectedPanel.prompt.trim().length === 0) {
+      if (composed.trim().length > 0) {
+        updatePanel(selectedPanel.id, { prompt: composed });
+      }
+    }
+  }, [
+    characterSelection,
+    characters,
+    items,
+    locationSelection,
+    locations,
+    selectedItemIds,
+    selectedPanel,
+    updatePanel,
+  ]);
 
   const beginMove = useCallback(
     (panelId: UUID) => (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -2053,6 +2193,7 @@ function PanelsTab({
   const handleCanvasPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.target === event.currentTarget) {
       setSelectedPanelId(null);
+      setEditingPanelId(null);
     }
   }, []);
 
@@ -2136,14 +2277,30 @@ function PanelsTab({
     [markDirty],
   );
 
-  const selectedPanel = useMemo(() => {
-    if (!page || !selectedPanelId) return null;
-    return page.panels.find((panel) => panel.id === selectedPanelId) ?? null;
-  }, [page, selectedPanelId]);
+  const handlePageBackgroundChange = useCallback(
+    (value: string) => {
+      let updated = false;
+      setPage((previous) => {
+        if (!previous) return previous;
+        if (previous.backgroundColor === value) return previous;
+        updated = true;
+        return {
+          ...previous,
+          backgroundColor: value,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+      if (updated) {
+        markDirty();
+      }
+    },
+    [markDirty],
+  );
 
   const statusMessage = useMemo(() => {
     if (status === "loading") return "Loading layout...";
     if (status === "saving") return "Saving changes...";
+    if (status === "generating") return "Generating panel image...";
     if (status === "saved") return "Layout saved";
     if (status === "error") return error ?? "Layout unavailable";
     if (hasChanges) return "Unsaved changes";
@@ -2174,6 +2331,114 @@ function PanelsTab({
     [selectedPanel, updatePanel],
   );
 
+  const handleZoom = useCallback(
+    (direction: "in" | "out") => {
+      if (!selectedPanel) return;
+      const currentScale = selectedPanel.renderScale ?? 1;
+      const factor = direction === "in" ? 1.1 : 0.9;
+      const nextScale = clampFraction(currentScale * factor, 0.25, 4);
+      updatePanel(selectedPanel.id, { renderScale: nextScale });
+    },
+    [selectedPanel, updatePanel],
+  );
+
+  const beginImagePan = useCallback(
+    (panelId: UUID) => (event: ReactPointerEvent<HTMLImageElement>) => {
+      if (!page) return;
+      if (editingPanelId !== panelId) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const panel = page.panels.find((candidate) => candidate.id === panelId);
+      if (!panel) return;
+
+      const panelElement = event.currentTarget.parentElement as HTMLElement | null;
+      const rect = panelElement?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
+
+      interactionRef.current = {
+        panelId,
+        mode: "image-pan",
+        origin: panel.geometry,
+        pointerStartX: event.clientX,
+        pointerStartY: event.clientY,
+        imageOffsetX: panel.renderOffsetX ?? 0,
+        imageOffsetY: panel.renderOffsetY ?? 0,
+        panelWidth: rect.width || undefined,
+        panelHeight: rect.height || undefined,
+      };
+    },
+    [editingPanelId, page],
+  );
+
+  const handlePanelWidthChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      if (!selectedPanel) return;
+      const nextPercent = Number(event.target.value);
+      if (!Number.isFinite(nextPercent)) return;
+      const width = clampFraction(nextPercent / 100, MIN_PANEL_SIZE, 1);
+      const maxX = 1 - width;
+      const x = clampFraction(selectedPanel.geometry.x, 0, maxX < 0 ? 0 : maxX);
+      updateGeometry(selectedPanel.id, { ...selectedPanel.geometry, x, width });
+    },
+    [selectedPanel, updateGeometry],
+  );
+
+  const handlePanelHeightChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      if (!selectedPanel) return;
+      const nextPercent = Number(event.target.value);
+      if (!Number.isFinite(nextPercent)) return;
+      const height = clampFraction(nextPercent / 100, MIN_PANEL_SIZE, 1);
+      const maxY = 1 - height;
+      const y = clampFraction(selectedPanel.geometry.y, 0, maxY < 0 ? 0 : maxY);
+      updateGeometry(selectedPanel.id, { ...selectedPanel.geometry, y, height });
+    },
+    [selectedPanel, updateGeometry],
+  );
+
+  const handleCharacterChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      const value = event.target.value;
+      setCharacterSelection((previous) => ({
+        characterId: value || undefined,
+        slotId: value ? previous.slotId : undefined,
+      }));
+    },
+    [],
+  );
+
+  const handleCharacterSlotChange = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value;
+    setCharacterSelection((previous) => ({
+      ...previous,
+      slotId: value || undefined,
+    }));
+  }, []);
+
+  const handleLocationChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      const value = event.target.value;
+      setLocationSelection((previous) => ({
+        locationId: value || undefined,
+        spotId: value ? previous.spotId : undefined,
+      }));
+    },
+    [],
+  );
+
+  const handleLocationViewChange = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value;
+    setLocationSelection((previous) => ({
+      ...previous,
+      spotId: value === "" ? undefined : (value as UUID | "primary"),
+    }));
+  }, []);
+
+  const handleItemSelectionChange = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
+    const options = Array.from(event.target.selectedOptions);
+    setSelectedItemIds(options.map((option) => option.value as UUID));
+  }, []);
+
   const handleCreatePanel = useCallback(async () => {
     setStatus("saving");
     setError(null);
@@ -2199,7 +2464,18 @@ function PanelsTab({
         geminiKey: settings.geminiKey,
         projectSlug: settings.projectSlug,
       });
-      markLayoutLoaded(result.page);
+
+      // Keep existing layout (including zoom/pan) and just append the new panel locally.
+      setPage((previous) => {
+        if (!previous) return previous;
+        const panels = [...previous.panels, result.panel];
+        return {
+          ...previous,
+          panels,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+      setHasChanges(true);
       setSelectedPanelId(result.panel.id);
       setStatus("saved");
     } catch (cause) {
@@ -2225,43 +2501,250 @@ function PanelsTab({
         geminiKey: settings.geminiKey,
         projectSlug: settings.projectSlug,
       });
-      markLayoutLoaded(result.page);
-      
-      // If we deleted the selected panel, select another one
+
+      // Mirror the server-side deletion locally without resetting other panel state.
+      setPage((previous) => {
+        if (!previous) return previous;
+        const remaining = previous.panels.filter((panel) => panel.id !== panelId);
+        return {
+          ...previous,
+          panels: remaining.map((panel, index) => ({
+            ...panel,
+            order: index,
+            updatedAt: new Date().toISOString(),
+          })),
+          updatedAt: new Date().toISOString(),
+        };
+      });
+      setHasChanges(true);
+
+      // If we deleted the selected or editing panel, clear or move selection.
       if (selectedPanelId === panelId) {
-        setSelectedPanelId(result.page.panels[0]?.id ?? null);
+        const next = page.panels.filter((panel) => panel.id !== panelId);
+        setSelectedPanelId(next[0]?.id ?? null);
       }
-      
+      if (editingPanelId === panelId) {
+        setEditingPanelId(null);
+      }
+
       setStatus("saved");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to delete panel");
       setStatus("error");
     }
-  }, [markLayoutLoaded, page, selectedPanelId, settings.geminiKey, settings.projectSlug]);
+  }, [editingPanelId, page, selectedPanelId, settings.geminiKey, settings.projectSlug]);
+
+  const handlePanelAssetUpload = useCallback(
+    async (panelId: UUID, file: File) => {
+      setPanelLibraryUploading((previous) => ({ ...previous, [panelId]: true }));
+      try {
+        const result = await uploadPanelImage({
+          panelId,
+          file,
+          geminiKey: settings.geminiKey,
+          projectSlug: settings.projectSlug,
+        });
+        setPage(result.page);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Failed to replace panel image");
+        setStatus("error");
+      } finally {
+        setPanelLibraryUploading((previous) => {
+          const next = { ...previous };
+          delete next[panelId];
+          return next;
+        });
+      }
+    },
+    [settings.geminiKey, settings.projectSlug],
+  );
+
+  const handleExportPage = useCallback(async () => {
+    if (!page) return;
+
+    try {
+      const width = Math.round(page.width || 1988);
+      const height = Math.round(page.height || 3075);
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      ctx.fillStyle = page.backgroundColor ?? "#ffffff";
+      ctx.fillRect(0, 0, width, height);
+
+      const panelsWithImage = page.panels.filter((panel) => panel.renderAssetId);
+
+      for (const panel of panelsWithImage) {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = assetHref(panel.renderAssetId!);
+
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error("Failed to load panel image"));
+        });
+
+        const panelX = panel.geometry.x * width;
+        const panelY = panel.geometry.y * height;
+        const panelW = panel.geometry.width * width;
+        const panelH = panel.geometry.height * height;
+
+        const scale = panel.renderScale ?? 1;
+        const offsetX = panel.renderOffsetX ?? 0;
+        const offsetY = panel.renderOffsetY ?? 0;
+
+        const drawW = panelW * scale;
+        const drawH = panelH * scale;
+
+        const centerX = panelX + panelW / 2;
+        const centerY = panelY + panelH / 2;
+
+        const drawX = centerX - drawW / 2 + offsetX * panelW;
+        const drawY = centerY - drawH / 2 + offsetY * panelH;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(panelX, panelY, panelW, panelH);
+        ctx.clip();
+        ctx.drawImage(img, drawX, drawY, drawW, drawH);
+        ctx.restore();
+      }
+
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((result) => resolve(result), "image/png", 1);
+      });
+      if (!blob) return;
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      const safeLabel = (page.label || "page").replace(/[^\w.-]+/g, "-");
+      link.download = `${safeLabel}.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to export page");
+      setStatus("error");
+    }
+  }, [page]);
+
+  const handleRenderSelectedPanel = useCallback(async () => {
+    if (!selectedPanel || !selectedPanel.prompt || selectedPanel.prompt.trim().length === 0) {
+      setError("Add a prompt for the selected panel before generating an image.");
+      return;
+    }
+
+    // Choose a primary reference image for image-to-image:
+    // prefer the selected character slot; otherwise fall back to the selected location view.
+    let referenceAssetId: UUID | undefined;
+    const selectedCharacter =
+      characterSelection.characterId &&
+      characters.find((candidate) => candidate.id === characterSelection.characterId);
+    const selectedSlot =
+      selectedCharacter && selectedCharacter.slots
+        ? selectedCharacter.slots.find((slot) => slot.id === characterSelection.slotId) ??
+          selectedCharacter.slots.find((slot) => slot.asset)
+        : undefined;
+    if (selectedSlot?.asset?.id) {
+      referenceAssetId = selectedSlot.asset.id;
+    } else if (locationSelection.locationId) {
+      const selectedLocation = locations.find((candidate) => candidate.id === locationSelection.locationId);
+      if (selectedLocation) {
+        if (locationSelection.spotId === "primary") {
+          referenceAssetId = selectedLocation.primaryAssetId as UUID | undefined;
+        } else if (locationSelection.spotId) {
+          const spot = selectedLocation.spots.find((candidate) => candidate.id === locationSelection.spotId);
+          referenceAssetId = spot?.referenceAssetId as UUID | undefined;
+        } else {
+          referenceAssetId =
+            (selectedLocation.primaryAssetId as UUID | undefined) ||
+            (selectedLocation.spots.find((spot) => spot.referenceAssetId)?.referenceAssetId as UUID | undefined);
+        }
+      }
+    }
+
+    setStatus("generating");
+    setError(null);
+
+    try {
+      const result = await renderPanelImage({
+        panelId: selectedPanel.id,
+        prompt: selectedPanel.prompt,
+        referenceAssetId,
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+      setPage(result.page);
+      setStatus("saved");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to generate panel image");
+      setStatus("error");
+    }
+  }, [
+    characterSelection,
+    characters,
+    locationSelection,
+    locations,
+    selectedPanel,
+    settings.geminiKey,
+    settings.projectSlug,
+  ]);
 
   return (
     <div className="pane">
-      <h2>Storyboard Planner</h2>
+      <div className="pane-header">
+        <h2>Storyboard Planner</h2>
+        <div className="subtabs" aria-label="Storyboard mode">
+          <button
+            type="button"
+            className={subTab === "layout" ? "subtab is-active" : "subtab"}
+            onClick={() => setSubTab("layout")}
+          >
+            Layout
+          </button>
+          <button
+            type="button"
+            className={subTab === "library" ? "subtab is-active" : "subtab"}
+            onClick={() => setSubTab("library")}
+          >
+            Library
+          </button>
+        </div>
+      </div>
       <p>
         Lay out panels with adjustable boxes. Select references from the other tabs and describe the action to
         generate comic-ready frames.
       </p>
-      <div className="storyboard">
+      {subTab === "layout" && (
+        <div className="storyboard">
         <div className="storyboard-column">
-          <div className="layout-toolbar">
-            <div>
-              <h3>Layout</h3>
-              <p className={`layout-status status-${status}`}>{statusMessage}</p>
-            </div>
-            <div className="layout-controls">
-              <button type="button" className="ghost" onClick={handleRefresh} disabled={status === "loading"}>
-                Reload
-              </button>
-              <button
-                type="button"
+            <div className="layout-toolbar">
+              <div>
+                <h3>Layout</h3>
+                <p className={`layout-status status-${status}`}>{statusMessage}</p>
+              </div>
+              <div className="layout-controls">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => void handleExportPage()}
+                  disabled={!page || status === "loading" || status === "saving" || status === "generating"}
+                >
+                  Export Page
+                </button>
+                <button type="button" className="ghost" onClick={handleRefresh} disabled={status === "loading"}>
+                  Reload
+                </button>
+                <button
+                  type="button"
                 className="ghost"
                 onClick={handleCreatePanel}
-                disabled={status === "loading" || status === "saving"}
+                disabled={status === "loading" || status === "saving" || status === "generating"}
               >
                 Add Panel
               </button>
@@ -2269,13 +2752,18 @@ function PanelsTab({
                 type="button"
                 className="primary"
                 onClick={handleSave}
-                disabled={!page || !hasChanges || status === "saving"}
+                disabled={!page || !hasChanges || status === "saving" || status === "generating"}
               >
                 {status === "saving" ? "Saving..." : "Save Layout"}
               </button>
             </div>
           </div>
-          <div className="storyboard-canvas" ref={canvasRef} onPointerDown={handleCanvasPointerDown}>
+          <div
+            className="storyboard-canvas"
+            ref={canvasRef}
+            onPointerDown={handleCanvasPointerDown}
+            style={page?.backgroundColor ? { background: page.backgroundColor } : undefined}
+          >
             {status === "loading" && <div className="storyboard-empty">Loading layout...</div>}
             {status === "error" && (
               <div className="storyboard-empty" role="alert">
@@ -2294,19 +2782,174 @@ function PanelsTab({
                     width: `${panel.geometry.width * 100}%`,
                     height: `${panel.geometry.height * 100}%`,
                   }}
-                  onPointerDown={beginMove(panel.id)}
+                  onPointerDown={editingPanelId === panel.id ? undefined : beginMove(panel.id)}
+                  onDoubleClick={() => {
+                    setEditingPanelId(panel.id);
+                    setSelectedPanelId(panel.id);
+                  }}
                 >
+                  {panel.renderAssetId && (
+                    <img
+                      src={assetHref(panel.renderAssetId)}
+                      alt={panel.label || "Panel render"}
+                      className="storyboard-panel-image"
+                      style={{
+                        transform: `translate(${(panel.renderOffsetX ?? 0) * 100}%, ${(panel.renderOffsetY ?? 0) * 100}%) scale(${panel.renderScale ?? 1})`,
+                        transformOrigin: "50% 50%",
+                        pointerEvents: editingPanelId === panel.id ? "auto" : "none",
+                        cursor: editingPanelId === panel.id ? "grab" : "default",
+                      }}
+                      onPointerDown={editingPanelId === panel.id ? beginImagePan(panel.id) : undefined}
+                    />
+                  )}
                   <span className="panel-label">{panel.label || "Untitled panel"}</span>
                   <span className="panel-order">#{panel.order + 1}</span>
                   <div className="panel-handle handle-nw" onPointerDown={beginResize(panel.id, "nw")} aria-hidden />
                   <div className="panel-handle handle-ne" onPointerDown={beginResize(panel.id, "ne")} aria-hidden />
                   <div className="panel-handle handle-sw" onPointerDown={beginResize(panel.id, "sw")} aria-hidden />
                   <div className="panel-handle handle-se" onPointerDown={beginResize(panel.id, "se")} aria-hidden />
+                  {editingPanelId === panel.id && (
+                    <div className="panel-zoom-controls">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleZoom("out");
+                        }}
+                      >
+                        -
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleZoom("in");
+                        }}
+                      >
+                        +
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setEditingPanelId(null);
+                          void handleSave();
+                        }}
+                      >
+                        Done
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
           </div>
         </div>
         <form className="storyboard-form" onSubmit={(event) => event.preventDefault()}>
+          <div className="field">
+            <h3>Prompt Builder</h3>
+            <p className="helper-text">
+              Pick references to seed the panel prompt. Bracketed names like <code>[Rabbit-front]</code> are auto-filled;
+              write your description around them.
+            </p>
+          </div>
+          <div className="field multi">
+            <div className="field">
+              <label htmlFor="storyboard-character">Character</label>
+              <select
+                id="storyboard-character"
+                value={characterSelection.characterId ?? ""}
+                onChange={handleCharacterChange}
+              >
+                <option value="">-- No character --</option>
+                {characters.map((character) => (
+                  <option key={character.id} value={character.id}>
+                    {character.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="storyboard-character-view">Character view</label>
+              <select
+                id="storyboard-character-view"
+                value={characterSelection.slotId ?? ""}
+                onChange={handleCharacterSlotChange}
+                disabled={!characterSelection.characterId}
+              >
+                <option value="">-- Any view --</option>
+                {characterSelection.characterId &&
+                  characters
+                    .find((character) => character.id === characterSelection.characterId)
+                    ?.slots?.filter((slot) => slot.asset)
+                    .map((slot) => (
+                      <option key={slot.id} value={slot.id}>
+                        {slot.label}
+                      </option>
+                    ))}
+              </select>
+            </div>
+          </div>
+          <div className="field multi">
+            <div className="field">
+              <label htmlFor="storyboard-location">Location</label>
+              <select
+                id="storyboard-location"
+                value={locationSelection.locationId ?? ""}
+                onChange={handleLocationChange}
+              >
+                <option value="">-- No location --</option>
+                {locations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="storyboard-location-view">Location view</label>
+              <select
+                id="storyboard-location-view"
+                value={locationSelection.spotId ?? ""}
+                onChange={handleLocationViewChange}
+                disabled={!locationSelection.locationId}
+              >
+                <option value="">-- Any view --</option>
+                {locationSelection.locationId && <option value="primary">Primary view</option>}
+                {locationSelection.locationId &&
+                  locations
+                    .find((location) => location.id === locationSelection.locationId)
+                    ?.spots.map((spot) => (
+                      <option key={spot.id} value={spot.id}>
+                        {spot.label}
+                      </option>
+                    ))}
+              </select>
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="storyboard-items">Items</label>
+            <select id="storyboard-items" multiple value={selectedItemIds} onChange={handleItemSelectionChange}>
+              {items.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+            <p className="helper-text">Hold Ctrl or Cmd to select multiple items.</p>
+          </div>
+          <div className="field">
+            <label htmlFor="auto-prompt">Auto-filled context</label>
+            <textarea
+              id="auto-prompt"
+              rows={2}
+              value={autoPrompt}
+              readOnly
+              placeholder="Selections will appear here in brackets."
+            />
+          </div>
           <div className="field">
             <label htmlFor="page-label">Page title</label>
             <input
@@ -2315,6 +2958,16 @@ function PanelsTab({
               value={page?.label ?? ""}
               onChange={(event) => handlePageLabelChange(event.target.value)}
               placeholder="Page 1"
+              disabled={!page}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="page-background">Page background color</label>
+            <input
+              id="page-background"
+              type="color"
+              value={page?.backgroundColor ?? "#0b0e14"}
+              onChange={(event) => handlePageBackgroundChange(event.target.value)}
               disabled={!page}
             />
           </div>
@@ -2342,6 +2995,54 @@ function PanelsTab({
                 <span>W {(selectedPanel.geometry.width * 100).toFixed(1)}%</span>
                 <span>H {(selectedPanel.geometry.height * 100).toFixed(1)}%</span>
               </div>
+              <div className="field multi">
+                <div className="field">
+                  <label htmlFor="panel-width-input">Panel width (%)</label>
+                  <input
+                    id="panel-width-input"
+                    type="number"
+                    min={Math.round(MIN_PANEL_SIZE * 100)}
+                    max={100}
+                    value={Number((selectedPanel.geometry.width * 100).toFixed(1))}
+                    onChange={handlePanelWidthChange}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="panel-height-input">Panel height (%)</label>
+                  <input
+                    id="panel-height-input"
+                    type="number"
+                    min={Math.round(MIN_PANEL_SIZE * 100)}
+                    max={100}
+                    value={Number((selectedPanel.geometry.height * 100).toFixed(1))}
+                    onChange={handlePanelHeightChange}
+                  />
+                </div>
+              </div>
+              <div className="field multi">
+                <div className="field">
+                  <label htmlFor="panel-width-input">Panel width (%)</label>
+                  <input
+                    id="panel-width-input"
+                    type="number"
+                    min={Math.round(MIN_PANEL_SIZE * 100)}
+                    max={100}
+                    value={Number((selectedPanel.geometry.width * 100).toFixed(1))}
+                    onChange={handlePanelWidthChange}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="panel-height-input">Panel height (%)</label>
+                  <input
+                    id="panel-height-input"
+                    type="number"
+                    min={Math.round(MIN_PANEL_SIZE * 100)}
+                    max={100}
+                    value={Number((selectedPanel.geometry.height * 100).toFixed(1))}
+                    onChange={handlePanelHeightChange}
+                  />
+                </div>
+              </div>
               <div className="field">
                 <label htmlFor="panel-label">Panel label</label>
                 <input
@@ -2363,7 +3064,7 @@ function PanelsTab({
                 />
               </div>
               <div className="field">
-                <label htmlFor="panel-prompt">Prompt</label>
+                <label htmlFor="panel-prompt">Panel prompt</label>
                 <textarea
                   id="panel-prompt"
                   rows={4}
@@ -2372,12 +3073,36 @@ function PanelsTab({
                   placeholder="The hero steps toward the oven while balancing the pan."
                 />
               </div>
+              <div className="field">
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={handleRenderSelectedPanel}
+                  disabled={
+                    !selectedPanel || status === "loading" || status === "saving" || status === "generating"
+                  }
+                >
+                  {status === "generating" ? "Generating..." : "Generate Panel Image"}
+                </button>
+              </div>
+              {selectedPanel.renderAssetId && (
+                <div className="field">
+                  <label>Latest render</label>
+                  <div className="asset-preview">
+                    <img
+                      src={assetHref(selectedPanel.renderAssetId)}
+                      alt={selectedPanel.label || "Panel render"}
+                      style={{ maxWidth: "100%", borderRadius: 4 }}
+                    />
+                  </div>
+                </div>
+              )}
               <div className="panel-actions">
                 <button
                   type="button"
                   className="ghost"
                   onClick={() => handleDeletePanel(selectedPanel.id)}
-                  disabled={!page || page.panels.length <= 1 || status === "saving"}
+                  disabled={!page || page.panels.length <= 1 || status === "saving" || status === "generating"}
                   title={page && page.panels.length <= 1 ? "Cannot delete the last panel" : "Delete this panel"}
                 >
                   Delete Panel
@@ -2394,6 +3119,59 @@ function PanelsTab({
           )}
         </form>
       </div>
+      )}
+      {subTab === "library" && page && (
+        <div className="storyboard-library">
+          {page.panels.map((panel) => (
+            <div key={panel.id} className="library-card">
+              <div className="library-thumb">
+                {panel.renderAssetId ? (
+                  <img
+                    src={assetHref(panel.renderAssetId)}
+                    alt={panel.label || `Panel ${panel.order + 1}`}
+                  />
+                ) : (
+                  <div className="library-thumb-empty">No render yet</div>
+                )}
+              </div>
+              <div className="library-meta">
+                <strong>{panel.label || `Panel ${panel.order + 1}`}</strong>
+                <span className="helper-text">Panel #{panel.order + 1}</span>
+              </div>
+              <div className="library-actions">
+                <a
+                  href={panel.renderAssetId ? assetHref(panel.renderAssetId) : "#"}
+                  download={`panel-${panel.order + 1}.png`}
+                  className="ghost"
+                  aria-disabled={!panel.renderAssetId}
+                  onClick={(event) => {
+                    if (!panel.renderAssetId) {
+                      event.preventDefault();
+                    }
+                  }}
+                >
+                  Download
+                </a>
+                <label className="upload">
+                  Replace
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    disabled={panelLibraryUploading[panel.id]}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      void handlePanelAssetUpload(panel.id, file);
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

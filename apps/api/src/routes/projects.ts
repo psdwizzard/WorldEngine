@@ -14,33 +14,36 @@ const anglePromptSchema = z.object({
   "three-quarter": z.string().optional(),
 });
 
+// Allow empty strings for default/layout prompts; UI may send "" when only
+// secondary fields (e.g., spotPrompt) are provided. We trim, but do not enforce
+// non-empty at validation time.
 const promptPresetSchema = z
   .object({
     character: z
       .object({
-        defaultPrompt: z.string().min(1),
+        defaultPrompt: z.string().transform((s) => s.trim()).optional(),
         anglePrompts: anglePromptSchema.partial().optional(),
       })
       .partial()
       .optional(),
     location: z
       .object({
-        defaultPrompt: z.string().min(1),
-        spotPrompt: z.string().optional(),
+        defaultPrompt: z.string().transform((s) => s.trim()).optional(),
+        spotPrompt: z.string().transform((s) => s.trim()).optional(),
       })
       .partial()
       .optional(),
     item: z
       .object({
-        defaultPrompt: z.string().min(1),
-        alternatePrompt: z.string().optional(),
+        defaultPrompt: z.string().transform((s) => s.trim()).optional(),
+        alternatePrompt: z.string().transform((s) => s.trim()).optional(),
       })
       .partial()
       .optional(),
     storyboard: z
       .object({
-        panelPrompt: z.string().min(1),
-        layoutPrompt: z.string().optional(),
+        panelPrompt: z.string().transform((s) => s.trim()).optional(),
+        layoutPrompt: z.string().transform((s) => s.trim()).optional(),
       })
       .partial()
       .optional(),

@@ -6,5 +6,23 @@
     "description": "Default project",
     "createdAt": "2025-11-15T17:41:46.575Z",
     "updatedAt": "2025-11-15T17:41:46.575Z"
+  },
+  {
+    "id": "4a578088-f5dc-442b-ac8e-1b995f3d9797",
+    "name": "rabbit-zero",
+    "slug": "rabbit-zero",
+    "issueLabel": "1",
+    "createdAt": "2025-11-15T19:39:26.051Z",
+    "updatedAt": "2025-11-15T19:45:47.424Z",
+    "promptPresets": {
+      "character": {
+        "defaultPrompt": "",
+        "anglePrompts": {
+          "left": "Please show me the left side of the character while maintaining the style and colors, this is to be used as a reference, keep it on a white background",
+          "right": "Please show me the right side of the character while maintaining the style and colors, this is to be used as a reference, keep it on a white background",
+          "back": "Please show me the back side of the character while maintaining the style and colors, this is to be used as a reference, keep it on a white background"
+        }
+      }
+    }
   }
 ]

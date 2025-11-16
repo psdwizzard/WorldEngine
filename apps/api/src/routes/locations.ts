@@ -1,11 +1,11 @@
-﻿import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
-import type { LocationBlueprint, LocationSpot, UUID } from "@worldengine/shared";
+import type { LocationSpot, UUID } from "@worldengine/shared";
 import { upload } from "../middleware/upload";
 import { saveAsset, saveAssetBuffer, getAsset, getAssetBuffer } from "../services/assetStore";
 import { resolveProjectSlug } from "../lib/projectScope";
 import { findProjectBySlug } from "../stores/projects";
+import { ensureLocation, ensureSpot, getLocation, listLocations, upsertLocation } from "../stores/locations";
 
 const locationPayload = z.object({
   locationId: z.string().uuid().optional(),
@@ -44,85 +44,29 @@ const generateFromImageSchema = z.object({
   spotLabel: z.string().optional(),
 });
 
-const locations = new Map<UUID, LocationBlueprint>();
-
-function ensureLocation(locationId: UUID | undefined, name?: string): LocationBlueprint {
-  if (locationId && locations.has(locationId)) {
-    const existing = locations.get(locationId)!;
-    if (name && name.trim()) {
-      existing.name = name.trim();
-      existing.updatedAt = new Date().toISOString();
-    }
-    return existing;
-  }
-
-  const id = locationId ?? randomUUID();
-  const now = new Date().toISOString();
-  const location: LocationBlueprint = {
-    id,
-    name: name?.trim() && name.trim().length > 0 ? name.trim() : "Untitled Location",
-    primaryAssetId: undefined,
-    spots: [],
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  locations.set(id, location);
-  return location;
-}
-
-function findSpot(location: LocationBlueprint, spotId?: UUID, spotLabel?: string): LocationSpot | null {
-  if (spotId) {
-    const existing = location.spots.find((spot) => spot.id === spotId);
-    if (existing) {
-      return existing;
-    }
-  }
-
-  if (spotLabel) {
-    const normalized = spotLabel.trim();
-    const existing = location.spots.find(
-      (spot) => spot.label.toLowerCase() === normalized.toLowerCase(),
-    );
-    if (existing) {
-      return existing;
-    }
-
-    const now = new Date().toISOString();
-    const created: LocationSpot = {
-      id: randomUUID(),
-      label: normalized,
-      notes: undefined,
-      referenceAssetId: undefined,
-      createdAt: now,
-      updatedAt: now,
-    };
-    location.spots.push(created);
-    return created;
-  }
-
-  return null;
-}
-
 export const locationsRouter = Router();
 
-locationsRouter.post("/generate", (req, res) => {
+locationsRouter.post("/generate", async (req, res) => {
   const parsed = locationPayload.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "invalid_payload", issues: parsed.error.flatten() });
   }
 
-  const location = ensureLocation(parsed.data.locationId as UUID | undefined, parsed.data.name);
+  const projectSlug = resolveProjectSlug(req);
+  const location = ensureLocation(projectSlug, parsed.data.locationId as UUID | undefined, parsed.data.name);
+
   if (parsed.data.referenceAssetId) {
     location.primaryAssetId = parsed.data.referenceAssetId;
   }
+
   if (parsed.data.secondarySpots.length) {
     parsed.data.secondarySpots.forEach((label) => {
-      findSpot(location, undefined, label);
+      ensureSpot(location, { label });
     });
   }
+
   location.updatedAt = new Date().toISOString();
-  locations.set(location.id, location);
+  await upsertLocation(location);
 
   res.json({ status: "queued", location });
 });
@@ -136,7 +80,7 @@ locationsRouter.post("/generate-view", async (req, res) => {
   const projectSlug = resolveProjectSlug(req);
   const { locationId, name, label, prompt } = parsed.data;
 
-  const location = ensureLocation(locationId as UUID | undefined, name);
+  const location = ensureLocation(projectSlug, locationId as UUID | undefined, name);
 
   try {
     const { generateImage } = await import("../lib/gemini");
@@ -176,21 +120,7 @@ locationsRouter.post("/generate-view", async (req, res) => {
     const imageBuffer = result.imageBuffer;
     const aiDescription = result.aiDescription;
 
-    const spot =
-      findSpot(location, undefined, label) ??
-      (() => {
-        const now = new Date().toISOString();
-        const created: LocationSpot = {
-          id: randomUUID(),
-          label,
-          notes: undefined,
-          referenceAssetId: undefined,
-          createdAt: now,
-          updatedAt: now,
-        };
-        location.spots.push(created);
-        return created;
-      })();
+    const spot = ensureSpot(location, { label }) as LocationSpot;
 
     const asset = await saveAssetBuffer(imageBuffer, {
       scope: ["locations", location.id, spot.id, "generated"],
@@ -204,7 +134,7 @@ locationsRouter.post("/generate-view", async (req, res) => {
     spot.referenceAssetId = asset.id;
     spot.updatedAt = new Date().toISOString();
     location.updatedAt = new Date().toISOString();
-    locations.set(location.id, location);
+    await upsertLocation(location);
 
     res.json({
       status: "generated",
@@ -251,7 +181,7 @@ locationsRouter.post("/generate-from-image", async (req, res) => {
     const spotPreset = locPresets?.spotPrompt?.trim();
 
     // Get source location name for context
-    const sourceLocation = locations.get(sourceLocationId as UUID);
+    const sourceLocation = getLocation(sourceLocationId as UUID, projectSlug);
     const sourceName = sourceLocation?.name ?? "location";
 
     const parts = [
@@ -284,13 +214,15 @@ locationsRouter.post("/generate-from-image", async (req, res) => {
     const imageBuffer = result.imageBuffer;
     const aiDescription = result.aiDescription;
 
-    let targetLocation: LocationBlueprint;
+    let targetLocationId: UUID;
+    let locationForResponseId: UUID;
     let spot: LocationSpot | null = null;
 
     if (createAsNew) {
       // Create a new location
       const locationName = newLocationName?.trim() || `${sourceName} - Variation`;
-      targetLocation = ensureLocation(undefined, locationName);
+      const targetLocation = ensureLocation(projectSlug, undefined, locationName);
+      targetLocationId = targetLocation.id;
 
       const asset = await saveAssetBuffer(imageBuffer, {
         scope: ["locations", targetLocation.id, "primary"],
@@ -303,57 +235,51 @@ locationsRouter.post("/generate-from-image", async (req, res) => {
 
       targetLocation.primaryAssetId = asset.id;
       targetLocation.updatedAt = new Date().toISOString();
-      locations.set(targetLocation.id, targetLocation);
+      await upsertLocation(targetLocation);
 
-      res.json({
+      return res.json({
         status: "generated",
         location: targetLocation,
         asset,
       });
-    } else {
-      // Add as a spot to the source location
-      if (!sourceLocation) {
-        return res.status(404).json({ error: "source_location_not_found" });
-      }
-
-      const label = spotLabel?.trim() || "Generated view";
-      spot =
-        findSpot(sourceLocation, undefined, label) ??
-        (() => {
-          const now = new Date().toISOString();
-          const created: LocationSpot = {
-            id: randomUUID(),
-            label,
-            notes: undefined,
-            referenceAssetId: undefined,
-            createdAt: now,
-            updatedAt: now,
-          };
-          sourceLocation.spots.push(created);
-          return created;
-        })();
-
-      const asset = await saveAssetBuffer(imageBuffer, {
-        scope: ["locations", sourceLocation.id, spot.id, "generated"],
-        mimeType: "image/png",
-        filename: `generated-${Date.now()}.png`,
-        aiDescription,
-        generatedFromPrompt: prompt,
-        projectSlug,
-      });
-
-      spot.referenceAssetId = asset.id;
-      spot.updatedAt = new Date().toISOString();
-      sourceLocation.updatedAt = new Date().toISOString();
-      locations.set(sourceLocation.id, sourceLocation);
-
-      res.json({
-        status: "generated",
-        location: sourceLocation,
-        spotId: spot.id,
-        asset,
-      });
     }
+
+    // Add as a spot to the source location
+    if (!sourceLocation) {
+      return res.status(404).json({ error: "source_location_not_found" });
+    }
+
+    const label = spotLabel?.trim() || "Generated view";
+    spot = ensureSpot(sourceLocation, { label });
+
+    if (!spot) {
+      return res.status(500).json({ error: "failed_to_assign_spot" });
+    }
+
+    const asset = await saveAssetBuffer(imageBuffer, {
+      scope: ["locations", sourceLocation.id, spot.id, "generated"],
+      mimeType: "image/png",
+      filename: `generated-${Date.now()}.png`,
+      aiDescription,
+      generatedFromPrompt: prompt,
+      projectSlug,
+    });
+
+    spot.referenceAssetId = asset.id;
+    spot.updatedAt = new Date().toISOString();
+    sourceLocation.updatedAt = new Date().toISOString();
+    await upsertLocation(sourceLocation);
+
+    locationForResponseId = sourceLocation.id;
+
+    const updatedLocation = getLocation(locationForResponseId, projectSlug);
+
+    res.json({
+      status: "generated",
+      location: updatedLocation,
+      spotId: spot.id,
+      asset,
+    });
   } catch (error) {
     console.error("location:generate_from_image_failed", error);
     res.status(500).json({ error: "generation_failed" });
@@ -372,10 +298,14 @@ locationsRouter.post("/upload", upload.single("reference"), async (req, res) => 
   }
 
   const projectSlug = resolveProjectSlug(req);
-  const location = ensureLocation(parsed.data.locationId as UUID | undefined, parsed.data.name);
+  const location = ensureLocation(projectSlug, parsed.data.locationId as UUID | undefined, parsed.data.name);
 
   try {
-    const spot = findSpot(location, parsed.data.spotId as UUID | undefined, parsed.data.spotLabel);
+    const spot = ensureSpot(location, {
+      spotId: parsed.data.spotId as UUID | undefined,
+      label: parsed.data.spotLabel,
+    });
+
     const scope = ["locations", location.id];
     if (spot) scope.push(spot.id);
     const asset = await saveAsset(file, scope, projectSlug);
@@ -388,7 +318,7 @@ locationsRouter.post("/upload", upload.single("reference"), async (req, res) => 
     }
 
     location.updatedAt = new Date().toISOString();
-    locations.set(location.id, location);
+    await upsertLocation(location);
 
     res.json({
       status: "stored",
@@ -402,6 +332,8 @@ locationsRouter.post("/upload", upload.single("reference"), async (req, res) => 
   }
 });
 
-locationsRouter.get("/", (_req, res) => {
-  res.json({ locations: Array.from(locations.values()) });
+locationsRouter.get("/", (req, res) => {
+  const projectSlug = resolveProjectSlug(req);
+  res.json({ locations: listLocations(projectSlug) });
 });
+

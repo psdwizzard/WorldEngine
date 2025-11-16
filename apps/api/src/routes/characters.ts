@@ -4,6 +4,7 @@ import type { CharacterAngle, UUID } from "@worldengine/shared";
 import { upload } from "../middleware/upload";
 import { saveAsset, saveAssetBuffer } from "../services/assetStore";
 import { resolveProjectSlug } from "../lib/projectScope";
+import { findProjectBySlug } from "../stores/projects";
 import {
   assignAsset,
   getCharacter,
@@ -14,6 +15,7 @@ import {
   removeSlot,
   setDefaultSlot,
   upsertCharacter,
+  deleteCharacter,
 } from "../stores/characters";
 
 const generateSchema = z.object({
@@ -21,6 +23,11 @@ const generateSchema = z.object({
   name: z.string().min(1),
   referenceAssetId: z.string().uuid().optional(),
   notes: z.string().optional(),
+});
+
+const updateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
 });
 
 const nullableUuid = z
@@ -94,6 +101,49 @@ export const charactersRouter = Router();
 charactersRouter.get("/", (req, res) => {
   const projectSlug = resolveProjectSlug(req);
   res.json({ characters: listCharacters(projectSlug) });
+});
+
+charactersRouter.patch("/:characterId", async (req, res) => {
+  const { characterId } = req.params;
+  const parsed = updateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid_update_payload", issues: parsed.error.flatten() });
+  }
+
+  const projectSlug = resolveProjectSlug(req);
+  const character = getCharacter(characterId as UUID, projectSlug);
+  if (!character) {
+    return res.status(404).json({ error: "character_not_found" });
+  }
+
+  const { name, description } = parsed.data;
+  if (name !== undefined) {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return res.status(400).json({ error: "name_required" });
+    }
+    character.name = trimmed;
+  }
+
+  if (description !== undefined) {
+    const trimmedDescription = description.trim();
+    character.description = trimmedDescription.length > 0 ? trimmedDescription : undefined;
+  }
+
+  await upsertCharacter(character);
+  res.json({ status: "updated", character });
+});
+
+charactersRouter.delete("/:characterId", async (req, res) => {
+  const { characterId } = req.params;
+  const projectSlug = resolveProjectSlug(req);
+
+  const removed = await deleteCharacter(characterId as UUID, projectSlug);
+  if (!removed) {
+    return res.status(404).json({ error: "character_not_found" });
+  }
+
+  res.json({ status: "removed" });
 });
 
 charactersRouter.post("/generate", async (req, res) => {
@@ -247,9 +297,26 @@ charactersRouter.post("/generate/slot", async (req, res) => {
       }
     }
 
-    // Build the generation request with source image
+    // Build the generation request with source image and best-available prompt
+    // Prefer explicit prompt from client; otherwise compose from project presets and angle
+    const activeAngle = (target.angle ?? sourceSlot.angle ?? "front") as CharacterAngle | null;
+    let composedPrompt: string | undefined = undefined;
+    if (!prompt) {
+      const project = projectSlug ? findProjectBySlug(projectSlug) : null;
+      const charPresets = project?.promptPresets?.character;
+      const base = charPresets?.defaultPrompt?.trim();
+      const angleAddon = activeAngle && charPresets?.anglePrompts?.[activeAngle]?.trim();
+      const parts = [
+        `Generate a ${activeAngle ?? "front"} view of the character consistent with the reference image.`,
+        base && `Style: ${base}`,
+        angleAddon,
+        `White background. Match colors and proportions. Keep costume and palette consistent.`,
+      ].filter(Boolean) as string[];
+      composedPrompt = parts.join(" ");
+    }
+
     const generationRequest = {
-      prompt: prompt || `Generate a character image for ${character.name}`,
+      prompt: prompt || composedPrompt || `Generate a character image for ${character.name}`,
       imageInput,
       outputDimensions: {
         width: 512,
@@ -258,7 +325,9 @@ charactersRouter.post("/generate/slot", async (req, res) => {
     };
 
     // Generate the image
-    const result = await generateImage(env, generationRequest);
+    const result = await generateImage(env, generationRequest, {
+      apiKeyOverride: req.header("x-gemini-key") ?? undefined,
+    });
     const imageBuffer = result.imageBuffer;
     const aiDescription = result.aiDescription;
 
