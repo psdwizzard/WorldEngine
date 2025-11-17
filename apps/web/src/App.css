@@ -109,7 +109,6 @@ body {
 
 .tab-content {
   padding: 2rem 3rem;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
@@ -268,10 +267,34 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.pane-storyboard {
+  max-width: 1280px;
+}
+
+.storyboard-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.layout-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.layout-page-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.35rem;
+}
+
 .storyboard {
   display: grid;
   gap: 1.5rem;
-  grid-template-columns: minmax(320px, 1fr) minmax(320px, 340px);
+  grid-template-columns: minmax(420px, 1.4fr) minmax(260px, 0.9fr);
 }
 
 .storyboard-canvas {
@@ -315,8 +338,28 @@ textarea {
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   pointer-events: none;
+}
+
+.field.collapsible {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.5rem 0.75rem 0.75rem;
+  background: rgba(7, 10, 18, 0.9);
+  gap: 0.35rem;
+}
+
+.collapsible-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0.15rem 0.25rem 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .panel-handle {

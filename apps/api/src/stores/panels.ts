@@ -230,6 +230,7 @@ export async function saveStoryboardPage(projectSlug: string, page: StoryboardPa
     // Treat width/height as real page dimensions (pixels or inches), allow larger pages.
     width: Number.isFinite(page.width) && page.width > 0 ? page.width : existingPage?.width ?? 1988,
     height: Number.isFinite(page.height) && page.height > 0 ? page.height : existingPage?.height ?? 3075,
+    backgroundColor: page.backgroundColor ?? existingPage?.backgroundColor,
     panels,
     createdAt: existingPage?.createdAt ?? page.createdAt ?? now(),
     updatedAt: now(),
@@ -247,4 +248,55 @@ export async function saveStoryboardPage(projectSlug: string, page: StoryboardPa
   await persistDocument(slug, document);
 
   return updatedPage;
+}
+
+export function listStoryboardPages(projectSlug: string): StoryboardPage[] {
+  const document = ensureDocument(projectSlug);
+  return document.pages;
+}
+
+export async function createStoryboardPage(projectSlug: string) {
+  const slug = normalizeProjectSlug(projectSlug ?? DEFAULT_PROJECT_SLUG);
+  const document = ensureDocument(slug);
+
+  const nextIndex = document.pages.length;
+  const base = createDefaultPage();
+  const label = `Page ${nextIndex + 1}`;
+  const createdAt = now();
+
+  const panels = base.panels.map((panel, index) => ({
+    ...panel,
+    pageId: base.id,
+    order: index,
+    createdAt,
+    updatedAt: createdAt,
+  }));
+
+  const page: StoryboardPage = {
+    ...base,
+    label,
+    panels,
+    createdAt,
+    updatedAt: createdAt,
+  };
+
+  document.pages.push(page);
+  document.activePageId = page.id;
+  document.updatedAt = page.updatedAt;
+  await persistDocument(slug, document);
+  return page;
+}
+
+export async function setActiveStoryboardPage(projectSlug: string, pageId: UUID) {
+  const slug = normalizeProjectSlug(projectSlug ?? DEFAULT_PROJECT_SLUG);
+  const document = ensureDocument(slug);
+  const page = document.pages.find((candidate) => candidate.id === pageId);
+  if (!page) {
+    return null;
+  }
+
+  document.activePageId = page.id;
+  document.updatedAt = now();
+  await persistDocument(slug, document);
+  return page;
 }

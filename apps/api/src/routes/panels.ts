@@ -2,9 +2,16 @@
 import { Router } from "express";
 import { z } from "zod";
 import type { PanelPrompt, StoryboardPage, StoryboardPanel, UUID } from "@worldengine/shared";
-import { getActivePage, saveStoryboardPage } from "../stores/panels";
+import {
+  getActivePage,
+  saveStoryboardPage,
+  listStoryboardPages,
+  createStoryboardPage,
+  setActiveStoryboardPage,
+} from "../stores/panels";
 import { resolveProjectSlug } from "../lib/projectScope";
 import { getAsset, getAssetBuffer, saveAsset, saveAssetBuffer } from "../services/assetStore";
+import sharp from "sharp";
 import { loadEnv } from "../lib/env";
 import { upload } from "../middleware/upload";
 
@@ -66,6 +73,11 @@ const renderPanelSchema = z.object({
   panelId: z.string().uuid(),
   prompt: z.string().min(1),
   referenceAssetId: z.string().uuid().optional(),
+  referenceAssetIds: z.array(z.string().uuid()).optional(),
+});
+
+const pageIdParamSchema = z.object({
+  pageId: z.string().uuid(),
 });
 
 export const panelsRouter = Router();
@@ -231,13 +243,74 @@ panelsRouter.post("/render", async (req, res) => {
     const env = loadEnv();
 
     let imageInput: { mimeType: string; data: string } | undefined;
+
+    const referenceIds: UUID[] = [];
     if (parsed.data.referenceAssetId) {
-      const asset = getAsset(parsed.data.referenceAssetId);
-      const buffer = await getAssetBuffer(parsed.data.referenceAssetId);
+      referenceIds.push(parsed.data.referenceAssetId as UUID);
+    }
+    if (parsed.data.referenceAssetIds && parsed.data.referenceAssetIds.length > 0) {
+      for (const id of parsed.data.referenceAssetIds) {
+        if (!referenceIds.includes(id as UUID)) {
+          referenceIds.push(id as UUID);
+        }
+      }
+    }
+
+    if (referenceIds.length === 1) {
+      const assetId = referenceIds[0];
+      const asset = getAsset(assetId);
+      const buffer = await getAssetBuffer(assetId);
       if (asset && buffer) {
         imageInput = {
           mimeType: asset.meta.mimeType,
           data: buffer.toString("base64"),
+        };
+      }
+    } else if (referenceIds.length > 1) {
+      const buffers: Buffer[] = [];
+      for (const id of referenceIds) {
+        const buffer = await getAssetBuffer(id);
+        if (buffer) {
+          buffers.push(buffer);
+        }
+      }
+
+      if (buffers.length === 1) {
+        imageInput = {
+          mimeType: "image/png",
+          data: buffers[0].toString("base64"),
+        };
+      } else if (buffers.length > 1) {
+        // Combine multiple reference images into a single stacked image for Gemini.
+        const normalized = await Promise.all(buffers.map((buffer) => sharp(buffer).png().toBuffer()));
+        const metas = await Promise.all(normalized.map((buffer) => sharp(buffer).metadata()));
+
+        const width = Math.max(...metas.map((meta) => meta.width ?? 0));
+        const totalHeight = metas.reduce((sum, meta) => sum + (meta.height ?? 0), 0);
+
+        let currentTop = 0;
+        const composites = normalized.map((buffer, index) => {
+          const meta = metas[index];
+          const top = currentTop;
+          currentTop += meta.height ?? 0;
+          return { input: buffer, top, left: 0 };
+        });
+
+        const combined = await sharp({
+          create: {
+            width: width || 1024,
+            height: totalHeight || 1024,
+            channels: 4,
+            background: { r: 0, g: 0, b: 0, alpha: 0 },
+          },
+        })
+          .composite(composites)
+          .png()
+          .toBuffer();
+
+        imageInput = {
+          mimeType: "image/png",
+          data: combined.toString("base64"),
         };
       }
     }
@@ -306,5 +379,32 @@ panelsRouter.put("/layout", async (req, res) => {
 
   const projectSlug = resolveProjectSlug(req);
   const page = await saveStoryboardPage(projectSlug, parsed.data);
+  res.json({ page });
+});
+
+panelsRouter.get("/pages", (req, res) => {
+  const projectSlug = resolveProjectSlug(req);
+  const pages = listStoryboardPages(projectSlug);
+  res.json({ pages });
+});
+
+panelsRouter.post("/pages", async (req, res) => {
+  const projectSlug = resolveProjectSlug(req);
+  const page = await createStoryboardPage(projectSlug);
+  res.status(201).json({ page });
+});
+
+panelsRouter.post("/pages/:pageId/activate", async (req, res) => {
+  const parsed = pageIdParamSchema.safeParse({ pageId: req.params.pageId });
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid_page_id", issues: parsed.error.flatten() });
+  }
+
+  const projectSlug = resolveProjectSlug(req);
+  const page = await setActiveStoryboardPage(projectSlug, parsed.data.pageId as UUID);
+  if (!page) {
+    return res.status(404).json({ error: "page_not_found" });
+  }
+
   res.json({ page });
 });

@@ -487,6 +487,66 @@ export async function saveStoryboardLayout(
   return payload.page;
 }
 
+export async function listStoryboardPages(input?: {
+  geminiKey?: string;
+  projectSlug?: string;
+}): Promise<StoryboardPage[]> {
+  const response = await fetch(resolveUrl("/panels/pages"), {
+    headers: {
+      Accept: "application/json",
+      ...authHeader({ geminiKey: input?.geminiKey, projectSlug: input?.projectSlug }),
+    },
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to list storyboard pages");
+  }
+
+  const payload = (await response.json()) as { pages: StoryboardPage[] };
+  return payload.pages;
+}
+
+export async function createStoryboardPageApi(input?: {
+  geminiKey?: string;
+  projectSlug?: string;
+}): Promise<StoryboardPage> {
+  const response = await fetch(resolveUrl("/panels/pages"), {
+    method: "POST",
+    headers: {
+      ...authHeader({ geminiKey: input?.geminiKey, projectSlug: input?.projectSlug }),
+    },
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to create storyboard page");
+  }
+
+  const payload = (await response.json()) as { page: StoryboardPage };
+  return payload.page;
+}
+
+export async function activateStoryboardPage(
+  pageId: UUID,
+  input?: { geminiKey?: string; projectSlug?: string },
+): Promise<StoryboardPage> {
+  const response = await fetch(resolveUrl(`/panels/pages/${pageId}/activate`), {
+    method: "POST",
+    headers: {
+      ...authHeader({ geminiKey: input?.geminiKey, projectSlug: input?.projectSlug }),
+    },
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to activate storyboard page");
+  }
+
+  const payload = (await response.json()) as { page: StoryboardPage };
+  return payload.page;
+}
+
 export async function createPanel(input?: {
   geometry?: PanelGeometry;
   geminiKey?: string;
@@ -560,6 +620,7 @@ export async function renderPanelImage(input: {
   panelId: UUID;
   prompt: string;
   referenceAssetId?: UUID;
+  referenceAssetIds?: UUID[];
   geminiKey?: string;
   projectSlug?: string;
 }): Promise<{ page: StoryboardPage; panel: StoryboardPanel; asset: AssetReference }> {
@@ -573,6 +634,7 @@ export async function renderPanelImage(input: {
       panelId: input.panelId,
       prompt: input.prompt,
       referenceAssetId: input.referenceAssetId,
+      referenceAssetIds: input.referenceAssetIds,
     }),
   });
 

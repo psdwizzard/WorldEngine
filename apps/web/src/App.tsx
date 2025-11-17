@@ -39,6 +39,9 @@ import {
   generateLocationFromImage,
   renderPanelImage,
   uploadPanelImage,
+  listStoryboardPages,
+  createStoryboardPageApi,
+  activateStoryboardPage,
 } from "./lib/api";
 import "./App.css";
 
@@ -1106,6 +1109,7 @@ function ProjectAssetsTab({
   const [selectedItem, setSelectedItem] = useState<ItemReference | null>(null);
   const [deletingId, setDeletingId] = useState<UUID | null>(null);
   const [uploadingAngle, setUploadingAngle] = useState<CharacterAngle | null>(null);
+  const [uploadingLocationId, setUploadingLocationId] = useState<UUID | null>(null);
   const [renamingId, setRenamingId] = useState<UUID | null>(null);
   const [renamingAngle, setRenamingAngle] = useState<CharacterAngle | null>(null);
 
@@ -1230,6 +1234,36 @@ function ProjectAssetsTab({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleLocationPrimaryUpload = async (location: LocationBlueprint, event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setUploadingLocationId(location.id);
+    setError(null);
+
+    try {
+      const response = await uploadLocationReference({
+        locationId: location.id,
+        name: location.name,
+        file,
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+
+      setLocations((previous) =>
+        previous.map((candidate) => (candidate.id === response.location.id ? response.location : candidate)),
+      );
+      setSelectedLocation((current) =>
+        current && current.id === response.location.id ? response.location : current,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to replace location image");
+    } finally {
+      setUploadingLocationId(null);
+    }
   };
 
   const handleAngleUpload = async (angle: CharacterAngle, event: ChangeEvent<HTMLInputElement>) => {
@@ -1627,6 +1661,16 @@ function ProjectAssetsTab({
                         >
                           View
                         </button>
+                        <label className="upload">
+                          <input
+                            type="file"
+                            hidden
+                            accept="image/*"
+                            disabled={uploadingLocationId === loc.id}
+                            onChange={(event) => handleLocationPrimaryUpload(loc, event)}
+                          />
+                          {uploadingLocationId === loc.id ? "Uploading..." : previewUrl ? "Replace" : "Upload"}
+                        </label>
                       </div>
                     </div>
                   );
@@ -1677,6 +1721,16 @@ function ProjectAssetsTab({
                       >
                         Open
                       </button>
+                      <label className="upload">
+                        <input
+                          type="file"
+                          hidden
+                          accept="image/*"
+                          disabled={uploadingLocationId === selectedLocation.id}
+                          onChange={(event) => handleLocationPrimaryUpload(selectedLocation, event)}
+                        />
+                        {uploadingLocationId === selectedLocation.id ? "Uploading..." : "Replace"}
+                      </label>
                     </div>
                   </div>
                 )}
@@ -1867,6 +1921,7 @@ function PanelsTab({
     "idle",
   );
   const [error, setError] = useState<string | null>(null);
+  const [pages, setPages] = useState<StoryboardPage[]>([]);
   const [selectedPanelId, setSelectedPanelId] = useState<UUID | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -1887,6 +1942,12 @@ function PanelsTab({
   const [editingPanelId, setEditingPanelId] = useState<UUID | null>(null);
   const [panelLibraryUploading, setPanelLibraryUploading] = useState<Record<UUID, boolean>>({});
   const [subTab, setSubTab] = useState<"layout" | "library">("layout");
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
+    references: false,
+    page: false,
+    panel: false,
+    generation: false,
+  });
 
   const markDirty = useCallback(() => {
     setHasChanges(true);
@@ -1947,6 +2008,29 @@ function PanelsTab({
     };
 
     void loadLookups();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.geminiKey, settings.projectSlug]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPages = async () => {
+      if (!settings.projectSlug) return;
+      try {
+        const list = await listStoryboardPages({
+          geminiKey: settings.geminiKey,
+          projectSlug: settings.projectSlug,
+        });
+        if (cancelled) return;
+        setPages(list);
+      } catch (cause) {
+        console.error("storyboard:pages_load_failed", cause);
+      }
+    };
+
+    void loadPages();
 
     return () => {
       cancelled = true;
@@ -2200,6 +2284,10 @@ function PanelsTab({
   const markLayoutLoaded = useCallback(
     (layout: StoryboardPage) => {
       setPage(layout);
+      setPages((current) => {
+        const without = current.filter((candidate) => candidate.id !== layout.id);
+        return [...without, layout];
+      });
       setHasChanges(false);
       setStatus((current) => {
         if (current === "loading" || current === "error") {
@@ -2252,6 +2340,11 @@ function PanelsTab({
         projectSlug: settings.projectSlug,
       });
       markLayoutLoaded(layout);
+      const list = await listStoryboardPages({
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+      setPages(list);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to load layout");
       setStatus("error");
@@ -2340,6 +2433,46 @@ function PanelsTab({
       updatePanel(selectedPanel.id, { renderScale: nextScale });
     },
     [selectedPanel, updatePanel],
+  );
+
+  const handleResetCrop = useCallback(() => {
+    if (!selectedPanel) return;
+    updatePanel(selectedPanel.id, {
+      renderScale: 1,
+      renderOffsetX: 0,
+      renderOffsetY: 0,
+    });
+  }, [selectedPanel, updatePanel]);
+
+  const movePanelLayer = useCallback(
+    (panelId: UUID, direction: "up" | "down") => {
+      setPage((previous) => {
+        if (!previous) return previous;
+        const index = previous.panels.findIndex((panel) => panel.id === panelId);
+        if (index === -1) return previous;
+
+        const targetIndex = direction === "up" ? Math.min(previous.panels.length - 1, index + 1) : Math.max(0, index - 1);
+        if (targetIndex === index) return previous;
+
+        const panels = [...previous.panels];
+        const [moved] = panels.splice(index, 1);
+        panels.splice(targetIndex, 0, moved);
+
+        const reindexed = panels.map((panel, order) => ({
+          ...panel,
+          order,
+          updatedAt: new Date().toISOString(),
+        }));
+
+        return {
+          ...previous,
+          panels: reindexed,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+      markDirty();
+    },
+    [markDirty],
   );
 
   const beginImagePan = useCallback(
@@ -2484,6 +2617,41 @@ function PanelsTab({
     }
   }, [markLayoutLoaded, page, settings.geminiKey, settings.projectSlug]);
 
+  const handleCreatePage = useCallback(async () => {
+    setStatus("saving");
+    setError(null);
+    try {
+      const next = await createStoryboardPageApi({
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+      markLayoutLoaded(next);
+      setSelectedPanelId(next.panels[0]?.id ?? null);
+      setStatus("saved");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to create page");
+      setStatus("error");
+    }
+  }, [markLayoutLoaded, settings.geminiKey, settings.projectSlug]);
+
+  const handleSelectPage = useCallback(
+    async (pageId: UUID) => {
+      setStatus("loading");
+      setError(null);
+      try {
+        const active = await activateStoryboardPage(pageId, {
+          geminiKey: settings.geminiKey,
+          projectSlug: settings.projectSlug,
+        });
+        markLayoutLoaded(active);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Failed to switch page");
+        setStatus("error");
+      }
+    },
+    [markLayoutLoaded, settings.geminiKey, settings.projectSlug],
+  );
+
   const handleDeletePanel = useCallback(async (panelId: UUID) => {
     if (!page) return;
     
@@ -2563,8 +2731,13 @@ function PanelsTab({
     if (!page) return;
 
     try {
-      const width = Math.round(page.width || 1988);
-      const height = Math.round(page.height || 3075);
+      // If width/height look like normalized fractions (0-1), fall back to
+      // the default page size so we don't export a 1px canvas.
+      const hasNormalizedSize =
+        page.width > 0 && page.width <= 1 && page.height > 0 && page.height <= 1;
+
+      const width = Math.round(hasNormalizedSize ? 1988 : page.width || 1988);
+      const height = Math.round(hasNormalizedSize ? 3075 : page.height || 3075);
       const canvas = document.createElement("canvas");
       canvas.width = width;
       canvas.height = height;
@@ -2592,12 +2765,19 @@ function PanelsTab({
         const panelW = panel.geometry.width * width;
         const panelH = panel.geometry.height * height;
 
-        const scale = panel.renderScale ?? 1;
+        // Compute a base scale that fits the entire image inside the panel (letterboxed),
+        // then apply the user-controlled renderScale on top so UI and export match.
+        const imageAspect = img.width / img.height || 1;
+        const panelAspect = panelW / panelH || 1;
+        const containScale =
+          panelAspect > imageAspect ? panelH / img.height || 1 : panelW / img.width || 1;
+
+        const scale = (panel.renderScale ?? 1) * containScale;
         const offsetX = panel.renderOffsetX ?? 0;
         const offsetY = panel.renderOffsetY ?? 0;
 
-        const drawW = panelW * scale;
-        const drawH = panelH * scale;
+        const drawW = img.width * scale;
+        const drawH = img.height * scale;
 
         const centerX = panelX + panelW / 2;
         const centerY = panelY + panelH / 2;
@@ -2639,9 +2819,11 @@ function PanelsTab({
       return;
     }
 
-    // Choose a primary reference image for image-to-image:
-    // prefer the selected character slot; otherwise fall back to the selected location view.
-    let referenceAssetId: UUID | undefined;
+    // Collect reference images for image-to-image:
+    // prefer the selected character slot; also include the selected location view if present.
+    let primaryReferenceAssetId: UUID | undefined;
+    const referenceAssetIds: UUID[] = [];
+
     const selectedCharacter =
       characterSelection.characterId &&
       characters.find((candidate) => candidate.id === characterSelection.characterId);
@@ -2650,23 +2832,34 @@ function PanelsTab({
         ? selectedCharacter.slots.find((slot) => slot.id === characterSelection.slotId) ??
           selectedCharacter.slots.find((slot) => slot.asset)
         : undefined;
+
     if (selectedSlot?.asset?.id) {
-      referenceAssetId = selectedSlot.asset.id;
-    } else if (locationSelection.locationId) {
+      primaryReferenceAssetId = selectedSlot.asset.id as UUID;
+      referenceAssetIds.push(selectedSlot.asset.id as UUID);
+    }
+
+    if (locationSelection.locationId) {
       const selectedLocation = locations.find((candidate) => candidate.id === locationSelection.locationId);
       if (selectedLocation) {
+        let locationAssetId: UUID | undefined;
         if (locationSelection.spotId === "primary") {
-          referenceAssetId = selectedLocation.primaryAssetId as UUID | undefined;
+          locationAssetId = selectedLocation.primaryAssetId as UUID | undefined;
         } else if (locationSelection.spotId) {
           const spot = selectedLocation.spots.find((candidate) => candidate.id === locationSelection.spotId);
-          referenceAssetId = spot?.referenceAssetId as UUID | undefined;
+          locationAssetId = spot?.referenceAssetId as UUID | undefined;
         } else {
-          referenceAssetId =
+          locationAssetId =
             (selectedLocation.primaryAssetId as UUID | undefined) ||
             (selectedLocation.spots.find((spot) => spot.referenceAssetId)?.referenceAssetId as UUID | undefined);
         }
+
+        if (locationAssetId && !referenceAssetIds.includes(locationAssetId)) {
+          referenceAssetIds.push(locationAssetId);
+        }
       }
     }
+
+    const effectiveReferenceAssetId = primaryReferenceAssetId ?? referenceAssetIds[0];
 
     setStatus("generating");
     setError(null);
@@ -2675,7 +2868,8 @@ function PanelsTab({
       const result = await renderPanelImage({
         panelId: selectedPanel.id,
         prompt: selectedPanel.prompt,
-        referenceAssetId,
+        referenceAssetId: effectiveReferenceAssetId,
+        referenceAssetIds: referenceAssetIds.length > 0 ? referenceAssetIds : undefined,
         geminiKey: settings.geminiKey,
         projectSlug: settings.projectSlug,
       });
@@ -2696,7 +2890,7 @@ function PanelsTab({
   ]);
 
   return (
-    <div className="pane">
+    <div className="pane pane-storyboard">
       <div className="pane-header">
         <h2>Storyboard Planner</h2>
         <div className="subtabs" aria-label="Storyboard mode">
@@ -2726,6 +2920,29 @@ function PanelsTab({
             <div className="layout-toolbar">
               <div>
                 <h3>Layout</h3>
+                <div className="layout-page-meta">
+                  <label htmlFor="storyboard-page-picker">Page</label>
+                  <select
+                    id="storyboard-page-picker"
+                    value={page?.id ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (value) {
+                        void handleSelectPage(value as UUID);
+                      }
+                    }}
+                    disabled={!page || status === "loading"}
+                  >
+                    {pages
+                      .slice()
+                      .sort((a, b) => a.label.localeCompare(b.label))
+                      .map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.label}
+                        </option>
+                      ))}
+                  </select>
+                </div>
                 <p className={`layout-status status-${status}`}>{statusMessage}</p>
               </div>
               <div className="layout-controls">
@@ -2747,6 +2964,14 @@ function PanelsTab({
                 disabled={status === "loading" || status === "saving" || status === "generating"}
               >
                 Add Panel
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => void handleCreatePage()}
+                disabled={status === "saving" || status === "generating"}
+              >
+                New Page
               </button>
               <button
                 type="button"
@@ -2825,10 +3050,42 @@ function PanelsTab({
                         className="ghost"
                         onClick={(event) => {
                           event.stopPropagation();
+                          movePanelLayer(panel.id, "down");
+                        }}
+                        title="Send panel backward"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          movePanelLayer(panel.id, "up");
+                        }}
+                        title="Bring panel forward"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={(event) => {
+                          event.stopPropagation();
                           handleZoom("in");
                         }}
                       >
                         +
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleResetCrop();
+                        }}
+                      >
+                        Reset
                       </button>
                       <button
                         type="button"
@@ -2848,128 +3105,155 @@ function PanelsTab({
           </div>
         </div>
         <form className="storyboard-form" onSubmit={(event) => event.preventDefault()}>
-          <div className="field">
-            <h3>Prompt Builder</h3>
-            <p className="helper-text">
-              Pick references to seed the panel prompt. Bracketed names like <code>[Rabbit-front]</code> are auto-filled;
-              write your description around them.
-            </p>
-          </div>
-          <div className="field multi">
-            <div className="field">
-              <label htmlFor="storyboard-character">Character</label>
-              <select
-                id="storyboard-character"
-                value={characterSelection.characterId ?? ""}
-                onChange={handleCharacterChange}
-              >
-                <option value="">-- No character --</option>
-                {characters.map((character) => (
-                  <option key={character.id} value={character.id}>
-                    {character.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="storyboard-character-view">Character view</label>
-              <select
-                id="storyboard-character-view"
-                value={characterSelection.slotId ?? ""}
-                onChange={handleCharacterSlotChange}
-                disabled={!characterSelection.characterId}
-              >
-                <option value="">-- Any view --</option>
-                {characterSelection.characterId &&
-                  characters
-                    .find((character) => character.id === characterSelection.characterId)
-                    ?.slots?.filter((slot) => slot.asset)
-                    .map((slot) => (
-                      <option key={slot.id} value={slot.id}>
-                        {slot.label}
+          <div className="field collapsible">
+            <button
+              type="button"
+              className="collapsible-header"
+              onClick={() =>
+                setCollapsedSections((previous) => ({ ...previous, references: !previous.references }))
+              }
+            >
+              <span>Prompt Builder & References</span>
+              <span aria-hidden="true">{collapsedSections.references ? "▸" : "▾"}</span>
+            </button>
+            {!collapsedSections.references && (
+              <>
+                <p className="helper-text">
+                  Pick references to seed the panel prompt. Bracketed names like <code>[Rabbit-front]</code> are
+                  auto-filled; write your description around them.
+                </p>
+                <div className="field multi">
+                  <div className="field">
+                    <label htmlFor="storyboard-character">Character</label>
+                    <select
+                      id="storyboard-character"
+                      value={characterSelection.characterId ?? ""}
+                      onChange={handleCharacterChange}
+                    >
+                      <option value="">-- No character --</option>
+                      {characters.map((character) => (
+                        <option key={character.id} value={character.id}>
+                          {character.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="storyboard-character-view">Character view</label>
+                    <select
+                      id="storyboard-character-view"
+                      value={characterSelection.slotId ?? ""}
+                      onChange={handleCharacterSlotChange}
+                      disabled={!characterSelection.characterId}
+                    >
+                      <option value="">-- Any view --</option>
+                      {characterSelection.characterId &&
+                        characters
+                          .find((character) => character.id === characterSelection.characterId)
+                          ?.slots?.filter((slot) => slot.asset)
+                          .map((slot) => (
+                            <option key={slot.id} value={slot.id}>
+                              {slot.label}
+                            </option>
+                          ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="field multi">
+                  <div className="field">
+                    <label htmlFor="storyboard-location">Location</label>
+                    <select
+                      id="storyboard-location"
+                      value={locationSelection.locationId ?? ""}
+                      onChange={handleLocationChange}
+                    >
+                      <option value="">-- No location --</option>
+                      {locations.map((location) => (
+                        <option key={location.id} value={location.id}>
+                          {location.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="storyboard-location-view">Location view</label>
+                    <select
+                      id="storyboard-location-view"
+                      value={locationSelection.spotId ?? ""}
+                      onChange={handleLocationViewChange}
+                      disabled={!locationSelection.locationId}
+                    >
+                      <option value="">-- Any view --</option>
+                      {locationSelection.locationId && <option value="primary">Primary view</option>}
+                      {locationSelection.locationId &&
+                        locations
+                          .find((location) => location.id === locationSelection.locationId)
+                          ?.spots.map((spot) => (
+                            <option key={spot.id} value={spot.id}>
+                              {spot.label}
+                            </option>
+                          ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="field">
+                  <label htmlFor="storyboard-items">Items</label>
+                  <select id="storyboard-items" multiple value={selectedItemIds} onChange={handleItemSelectionChange}>
+                    {items.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
                       </option>
                     ))}
-              </select>
-            </div>
+                  </select>
+                  <p className="helper-text">Hold Ctrl or Cmd to select multiple items.</p>
+                </div>
+                <div className="field">
+                  <label htmlFor="auto-prompt">Auto-filled context</label>
+                  <textarea
+                    id="auto-prompt"
+                    rows={2}
+                    value={autoPrompt}
+                    readOnly
+                    placeholder="Selections will appear here in brackets."
+                  />
+                </div>
+              </>
+            )}
           </div>
-          <div className="field multi">
-            <div className="field">
-              <label htmlFor="storyboard-location">Location</label>
-              <select
-                id="storyboard-location"
-                value={locationSelection.locationId ?? ""}
-                onChange={handleLocationChange}
-              >
-                <option value="">-- No location --</option>
-                {locations.map((location) => (
-                  <option key={location.id} value={location.id}>
-                    {location.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="storyboard-location-view">Location view</label>
-              <select
-                id="storyboard-location-view"
-                value={locationSelection.spotId ?? ""}
-                onChange={handleLocationViewChange}
-                disabled={!locationSelection.locationId}
-              >
-                <option value="">-- Any view --</option>
-                {locationSelection.locationId && <option value="primary">Primary view</option>}
-                {locationSelection.locationId &&
-                  locations
-                    .find((location) => location.id === locationSelection.locationId)
-                    ?.spots.map((spot) => (
-                      <option key={spot.id} value={spot.id}>
-                        {spot.label}
-                      </option>
-                    ))}
-              </select>
-            </div>
-          </div>
-          <div className="field">
-            <label htmlFor="storyboard-items">Items</label>
-            <select id="storyboard-items" multiple value={selectedItemIds} onChange={handleItemSelectionChange}>
-              {items.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-            <p className="helper-text">Hold Ctrl or Cmd to select multiple items.</p>
-          </div>
-          <div className="field">
-            <label htmlFor="auto-prompt">Auto-filled context</label>
-            <textarea
-              id="auto-prompt"
-              rows={2}
-              value={autoPrompt}
-              readOnly
-              placeholder="Selections will appear here in brackets."
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="page-label">Page title</label>
-            <input
-              id="page-label"
-              type="text"
-              value={page?.label ?? ""}
-              onChange={(event) => handlePageLabelChange(event.target.value)}
-              placeholder="Page 1"
-              disabled={!page}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="page-background">Page background color</label>
-            <input
-              id="page-background"
-              type="color"
-              value={page?.backgroundColor ?? "#0b0e14"}
-              onChange={(event) => handlePageBackgroundChange(event.target.value)}
-              disabled={!page}
-            />
+          <div className="field collapsible">
+            <button
+              type="button"
+              className="collapsible-header"
+              onClick={() => setCollapsedSections((previous) => ({ ...previous, page: !previous.page }))}
+            >
+              <span>Page settings</span>
+              <span aria-hidden="true">{collapsedSections.page ? "▸" : "▾"}</span>
+            </button>
+            {!collapsedSections.page && (
+              <>
+                <div className="field">
+                  <label htmlFor="page-label">Page title</label>
+                  <input
+                    id="page-label"
+                    type="text"
+                    value={page?.label ?? ""}
+                    onChange={(event) => handlePageLabelChange(event.target.value)}
+                    placeholder="Page 1"
+                    disabled={!page}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="page-background">Page background color</label>
+                  <input
+                    id="page-background"
+                    type="color"
+                    value={page?.backgroundColor ?? "#0b0e14"}
+                    onChange={(event) => handlePageBackgroundChange(event.target.value)}
+                    disabled={!page}
+                  />
+                </div>
+              </>
+            )}
           </div>
           <div className="field">
             <label htmlFor="panel-picker">Panel</label>
@@ -2989,124 +3273,132 @@ function PanelsTab({
           </div>
           {selectedPanel ? (
             <>
-              <div className="panel-coordinates">
-                <span>X {(selectedPanel.geometry.x * 100).toFixed(1)}%</span>
-                <span>Y {(selectedPanel.geometry.y * 100).toFixed(1)}%</span>
-                <span>W {(selectedPanel.geometry.width * 100).toFixed(1)}%</span>
-                <span>H {(selectedPanel.geometry.height * 100).toFixed(1)}%</span>
-              </div>
-              <div className="field multi">
-                <div className="field">
-                  <label htmlFor="panel-width-input">Panel width (%)</label>
-                  <input
-                    id="panel-width-input"
-                    type="number"
-                    min={Math.round(MIN_PANEL_SIZE * 100)}
-                    max={100}
-                    value={Number((selectedPanel.geometry.width * 100).toFixed(1))}
-                    onChange={handlePanelWidthChange}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="panel-height-input">Panel height (%)</label>
-                  <input
-                    id="panel-height-input"
-                    type="number"
-                    min={Math.round(MIN_PANEL_SIZE * 100)}
-                    max={100}
-                    value={Number((selectedPanel.geometry.height * 100).toFixed(1))}
-                    onChange={handlePanelHeightChange}
-                  />
-                </div>
-              </div>
-              <div className="field multi">
-                <div className="field">
-                  <label htmlFor="panel-width-input">Panel width (%)</label>
-                  <input
-                    id="panel-width-input"
-                    type="number"
-                    min={Math.round(MIN_PANEL_SIZE * 100)}
-                    max={100}
-                    value={Number((selectedPanel.geometry.width * 100).toFixed(1))}
-                    onChange={handlePanelWidthChange}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="panel-height-input">Panel height (%)</label>
-                  <input
-                    id="panel-height-input"
-                    type="number"
-                    min={Math.round(MIN_PANEL_SIZE * 100)}
-                    max={100}
-                    value={Number((selectedPanel.geometry.height * 100).toFixed(1))}
-                    onChange={handlePanelHeightChange}
-                  />
-                </div>
-              </div>
-              <div className="field">
-                <label htmlFor="panel-label">Panel label</label>
-                <input
-                  id="panel-label"
-                  type="text"
-                  value={selectedPanel.label}
-                  onChange={handleLabelChange}
-                  placeholder={`Panel ${selectedPanel.order + 1}`}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="panel-notes">Notes</label>
-                <textarea
-                  id="panel-notes"
-                  rows={3}
-                  value={selectedPanel.notes ?? ""}
-                  onChange={handleNotesChange}
-                  placeholder="Describe beats, reference assets, or camera direction."
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="panel-prompt">Panel prompt</label>
-                <textarea
-                  id="panel-prompt"
-                  rows={4}
-                  value={selectedPanel.prompt ?? ""}
-                  onChange={handlePromptChange}
-                  placeholder="The hero steps toward the oven while balancing the pan."
-                />
-              </div>
-              <div className="field">
+              <div className="field collapsible">
                 <button
                   type="button"
-                  className="primary"
-                  onClick={handleRenderSelectedPanel}
-                  disabled={
-                    !selectedPanel || status === "loading" || status === "saving" || status === "generating"
+                  className="collapsible-header"
+                  onClick={() =>
+                    setCollapsedSections((previous) => ({ ...previous, panel: !previous.panel }))
                   }
                 >
-                  {status === "generating" ? "Generating..." : "Generate Panel Image"}
+                  <span>Panel layout & details</span>
+                  <span aria-hidden="true">{collapsedSections.panel ? "▸" : "▾"}</span>
                 </button>
+                {!collapsedSections.panel && (
+                  <>
+                    <div className="panel-coordinates">
+                      <span>X {(selectedPanel.geometry.x * 100).toFixed(1)}%</span>
+                      <span>Y {(selectedPanel.geometry.y * 100).toFixed(1)}%</span>
+                      <span>W {(selectedPanel.geometry.width * 100).toFixed(1)}%</span>
+                      <span>H {(selectedPanel.geometry.height * 100).toFixed(1)}%</span>
+                    </div>
+                    <div className="field multi">
+                      <div className="field">
+                        <label htmlFor="panel-width-input">Panel width (%)</label>
+                        <input
+                          id="panel-width-input"
+                          type="number"
+                          min={Math.round(MIN_PANEL_SIZE * 100)}
+                          max={100}
+                          value={Number((selectedPanel.geometry.width * 100).toFixed(1))}
+                          onChange={handlePanelWidthChange}
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor="panel-height-input">Panel height (%)</label>
+                        <input
+                          id="panel-height-input"
+                          type="number"
+                          min={Math.round(MIN_PANEL_SIZE * 100)}
+                          max={100}
+                          value={Number((selectedPanel.geometry.height * 100).toFixed(1))}
+                          onChange={handlePanelHeightChange}
+                        />
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="panel-label">Panel label</label>
+                      <input
+                        id="panel-label"
+                        type="text"
+                        value={selectedPanel.label}
+                        onChange={handleLabelChange}
+                        placeholder={`Panel ${selectedPanel.order + 1}`}
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="panel-notes">Notes</label>
+                      <textarea
+                        id="panel-notes"
+                        rows={3}
+                        value={selectedPanel.notes ?? ""}
+                        onChange={handleNotesChange}
+                        placeholder="Describe beats, reference assets, or camera direction."
+                      />
+                    </div>
+                  </>
+                )}
               </div>
-              {selectedPanel.renderAssetId && (
-                <div className="field">
-                  <label>Latest render</label>
-                  <div className="asset-preview">
-                    <img
-                      src={assetHref(selectedPanel.renderAssetId)}
-                      alt={selectedPanel.label || "Panel render"}
-                      style={{ maxWidth: "100%", borderRadius: 4 }}
-                    />
-                  </div>
-                </div>
-              )}
-              <div className="panel-actions">
+              <div className="field collapsible">
                 <button
                   type="button"
-                  className="ghost"
-                  onClick={() => handleDeletePanel(selectedPanel.id)}
-                  disabled={!page || page.panels.length <= 1 || status === "saving" || status === "generating"}
-                  title={page && page.panels.length <= 1 ? "Cannot delete the last panel" : "Delete this panel"}
+                  className="collapsible-header"
+                  onClick={() =>
+                    setCollapsedSections((previous) => ({ ...previous, generation: !previous.generation }))
+                  }
                 >
-                  Delete Panel
+                  <span>Prompt & generation</span>
+                  <span aria-hidden="true">{collapsedSections.generation ? "▸" : "▾"}</span>
                 </button>
+                {!collapsedSections.generation && (
+                  <>
+                    <div className="field">
+                      <label htmlFor="panel-prompt">Panel prompt</label>
+                      <textarea
+                        id="panel-prompt"
+                        rows={4}
+                        value={selectedPanel.prompt ?? ""}
+                        onChange={handlePromptChange}
+                        placeholder="The hero steps toward the oven while balancing the pan."
+                      />
+                    </div>
+                    <div className="field">
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={handleRenderSelectedPanel}
+                        disabled={
+                          !selectedPanel || status === "loading" || status === "saving" || status === "generating"
+                        }
+                      >
+                        {status === "generating" ? "Generating..." : "Generate Panel Image"}
+                      </button>
+                    </div>
+                    {selectedPanel.renderAssetId && (
+                      <div className="field">
+                        <label>Latest render</label>
+                        <div className="asset-preview">
+                          <img
+                            src={assetHref(selectedPanel.renderAssetId)}
+                            alt={selectedPanel.label || "Panel render"}
+                            style={{ maxWidth: "100%", borderRadius: 4 }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <div className="panel-actions">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => handleDeletePanel(selectedPanel.id)}
+                        disabled={!page || page.panels.length <= 1 || status === "saving" || status === "generating"}
+                        title={page && page.panels.length <= 1 ? "Cannot delete the last panel" : "Delete this panel"}
+                      >
+                        Delete Panel
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </>
           ) : (
