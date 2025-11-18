@@ -78,6 +78,10 @@ export interface PanelPrompt {
   renderOffsetX?: number;
   /** Optional vertical offset for the rendered image within the panel (fraction of panel height). */
   renderOffsetY?: number;
+  /** Optional border width in pixels. */
+  strokeWidth?: number;
+  /** Optional border color (CSS string). */
+  strokeColor?: string;
   order: number;
   createdAt: string;
   updatedAt: string;

@@ -42,6 +42,7 @@ import {
   listStoryboardPages,
   createStoryboardPageApi,
   activateStoryboardPage,
+  deleteStoryboardPageApi,
 } from "./lib/api";
 import "./App.css";
 
@@ -1915,7 +1916,7 @@ function PanelsTab({
 }: {
   settingsController: SettingsController;
 }) {
-  const { settings } = settingsController;
+  const { settings, updateSetting } = settingsController;
   const [page, setPage] = useState<StoryboardPage | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "saving" | "saved" | "error" | "generating">(
     "idle",
@@ -2331,6 +2332,17 @@ function PanelsTab({
     }
   }, [markLayoutLoaded, page, settings.geminiKey, settings.projectSlug]);
 
+  // Auto-save effect
+  useEffect(() => {
+    if (!hasChanges || !page) return;
+
+    const timer = setTimeout(() => {
+      void handleSave();
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [page, hasChanges, handleSave]);
+
   const handleRefresh = useCallback(async () => {
     setStatus("loading");
     setError(null);
@@ -2372,22 +2384,21 @@ function PanelsTab({
 
   const handlePageBackgroundChange = useCallback(
     (value: string) => {
-      let updated = false;
+      if (!page) return;
+      if (page.backgroundColor === value) return;
+
       setPage((previous) => {
         if (!previous) return previous;
-        if (previous.backgroundColor === value) return previous;
-        updated = true;
         return {
           ...previous,
           backgroundColor: value,
           updatedAt: new Date().toISOString(),
         };
       });
-      if (updated) {
-        markDirty();
-      }
+      markDirty();
+      updateSetting("defaultPageBackgroundColor", value);
     },
-    [markDirty],
+    [page, markDirty, updateSetting],
   );
 
   const statusMessage = useMemo(() => {
@@ -2621,10 +2632,19 @@ function PanelsTab({
     setStatus("saving");
     setError(null);
     try {
-      const next = await createStoryboardPageApi({
+      let next = await createStoryboardPageApi({
         geminiKey: settings.geminiKey,
         projectSlug: settings.projectSlug,
       });
+
+      if (settings.defaultPageBackgroundColor) {
+        next = { ...next, backgroundColor: settings.defaultPageBackgroundColor };
+        next = await saveStoryboardLayout(next, {
+          geminiKey: settings.geminiKey,
+          projectSlug: settings.projectSlug,
+        });
+      }
+
       markLayoutLoaded(next);
       setSelectedPanelId(next.panels[0]?.id ?? null);
       setStatus("saved");
@@ -2632,7 +2652,33 @@ function PanelsTab({
       setError(cause instanceof Error ? cause.message : "Failed to create page");
       setStatus("error");
     }
-  }, [markLayoutLoaded, settings.geminiKey, settings.projectSlug]);
+  }, [markLayoutLoaded, settings.geminiKey, settings.projectSlug, settings.defaultPageBackgroundColor]);
+
+  const handleDeletePage = useCallback(async () => {
+    if (!page) return;
+    if (!window.confirm(`Delete "${page.label || "current page"}"? This cannot be undone.`)) {
+      return;
+    }
+
+    setStatus("saving");
+    setError(null);
+    try {
+      const active = await deleteStoryboardPageApi(page.id, {
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+      markLayoutLoaded(active);
+      const list = await listStoryboardPages({
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+      setPages(list);
+      setStatus("saved");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to delete page");
+      setStatus("error");
+    }
+  }, [markLayoutLoaded, page, settings.geminiKey, settings.projectSlug]);
 
   const handleSelectPage = useCallback(
     async (pageId: UUID) => {
@@ -2791,6 +2837,16 @@ function PanelsTab({
         ctx.clip();
         ctx.drawImage(img, drawX, drawY, drawW, drawH);
         ctx.restore();
+
+        if (panel.strokeWidth && panel.strokeWidth > 0) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(panelX, panelY, panelW, panelH);
+          ctx.lineWidth = panel.strokeWidth;
+          ctx.strokeStyle = panel.strokeColor ?? "#000000";
+          ctx.stroke();
+          ctx.restore();
+        }
       }
 
       const blob = await new Promise<Blob | null>((resolve) => {
@@ -2889,6 +2945,23 @@ function PanelsTab({
     settings.projectSlug,
   ]);
 
+  const handleStrokeWidthChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      if (!selectedPanel) return;
+      const value = parseFloat(event.target.value);
+      updatePanel(selectedPanel.id, { strokeWidth: Number.isNaN(value) ? 0 : value });
+    },
+    [selectedPanel, updatePanel],
+  );
+
+  const handleStrokeColorChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      if (!selectedPanel) return;
+      updatePanel(selectedPanel.id, { strokeColor: event.target.value });
+    },
+    [selectedPanel, updatePanel],
+  );
+
   return (
     <div className="pane pane-storyboard">
       <div className="pane-header">
@@ -2975,11 +3048,20 @@ function PanelsTab({
               </button>
               <button
                 type="button"
+                className="ghost"
+                onClick={() => void handleDeletePage()}
+                disabled={!page || pages.length <= 1 || status === "saving" || status === "generating"}
+                title={pages.length <= 1 ? "Cannot delete the last page" : "Delete this page"}
+              >
+                Delete Page
+              </button>
+              <button
+                type="button"
                 className="primary"
                 onClick={handleSave}
-                disabled={!page || !hasChanges || status === "saving" || status === "generating"}
+                disabled={!page || (!hasChanges && status !== "saving") || status === "generating"}
               >
-                {status === "saving" ? "Saving..." : "Save Layout"}
+                {status === "saving" ? "Saving..." : hasChanges ? "Save Now" : "Saved"}
               </button>
             </div>
           </div>
@@ -3006,6 +3088,9 @@ function PanelsTab({
                     top: `${panel.geometry.y * 100}%`,
                     width: `${panel.geometry.width * 100}%`,
                     height: `${panel.geometry.height * 100}%`,
+                    borderWidth: panel.strokeWidth ? `${panel.strokeWidth}px` : undefined,
+                    borderColor: panel.strokeColor,
+                    borderStyle: panel.strokeWidth ? "solid" : undefined,
                   }}
                   onPointerDown={editingPanelId === panel.id ? undefined : beginMove(panel.id)}
                   onDoubleClick={() => {
@@ -3313,6 +3398,28 @@ function PanelsTab({
                           max={100}
                           value={Number((selectedPanel.geometry.height * 100).toFixed(1))}
                           onChange={handlePanelHeightChange}
+                        />
+                      </div>
+                    </div>
+                    <div className="field multi">
+                      <div className="field">
+                        <label htmlFor="panel-stroke-width">Stroke width (px)</label>
+                        <input
+                          id="panel-stroke-width"
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={selectedPanel.strokeWidth ?? 0}
+                          onChange={handleStrokeWidthChange}
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor="panel-stroke-color">Stroke color</label>
+                        <input
+                          id="panel-stroke-color"
+                          type="color"
+                          value={selectedPanel.strokeColor ?? "#000000"}
+                          onChange={handleStrokeColorChange}
                         />
                       </div>
                     </div>

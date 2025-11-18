@@ -192,6 +192,8 @@ function mergePanel(existing: StoryboardPanel | undefined, incoming: StoryboardP
   const renderScale = incoming.renderScale ?? existing?.renderScale ?? 1;
   const renderOffsetX = incoming.renderOffsetX ?? existing?.renderOffsetX ?? 0;
   const renderOffsetY = incoming.renderOffsetY ?? existing?.renderOffsetY ?? 0;
+  const strokeWidth = incoming.strokeWidth ?? existing?.strokeWidth;
+  const strokeColor = incoming.strokeColor ?? existing?.strokeColor;
 
   return {
     id: incoming.id,
@@ -204,6 +206,8 @@ function mergePanel(existing: StoryboardPanel | undefined, incoming: StoryboardP
     renderScale,
     renderOffsetX,
     renderOffsetY,
+    strokeWidth,
+    strokeColor,
     prompt,
     notes,
     order: incoming.order ?? existing?.order ?? index,
@@ -299,4 +303,33 @@ export async function setActiveStoryboardPage(projectSlug: string, pageId: UUID)
   document.updatedAt = now();
   await persistDocument(slug, document);
   return page;
+}
+
+export async function deleteStoryboardPage(projectSlug: string, pageId: UUID) {
+  const slug = normalizeProjectSlug(projectSlug ?? DEFAULT_PROJECT_SLUG);
+  const document = ensureDocument(slug);
+
+  const pageIndex = document.pages.findIndex((p) => p.id === pageId);
+  if (pageIndex === -1) {
+    return null;
+  }
+
+  document.pages.splice(pageIndex, 1);
+
+  // If we deleted the active page, or if there are no pages left
+  if (document.pages.length === 0) {
+    const fallback = createDefaultPage();
+    document.pages.push(fallback);
+    document.activePageId = fallback.id;
+  } else if (document.activePageId === pageId) {
+    // Switch to the previous page, or the first one if we deleted the first one
+    const newActiveIndex = Math.max(0, pageIndex - 1);
+    document.activePageId = document.pages[newActiveIndex].id;
+  }
+  
+  document.updatedAt = now();
+  await persistDocument(slug, document);
+  
+  // Return the new active page so the frontend can switch to it
+  return document.pages.find(p => p.id === document.activePageId)!;
 }

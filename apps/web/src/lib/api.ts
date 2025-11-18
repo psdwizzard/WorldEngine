@@ -547,6 +547,26 @@ export async function activateStoryboardPage(
   return payload.page;
 }
 
+export async function deleteStoryboardPageApi(
+  pageId: UUID,
+  input?: { geminiKey?: string; projectSlug?: string },
+): Promise<StoryboardPage> {
+  const response = await fetch(resolveUrl(`/panels/pages/${pageId}`), {
+    method: "DELETE",
+    headers: {
+      ...authHeader({ geminiKey: input?.geminiKey, projectSlug: input?.projectSlug }),
+    },
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to delete storyboard page");
+  }
+
+  const payload = (await response.json()) as { page: StoryboardPage };
+  return payload.page;
+}
+
 export async function createPanel(input?: {
   geometry?: PanelGeometry;
   geminiKey?: string;

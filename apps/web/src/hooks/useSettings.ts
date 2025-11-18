@@ -6,6 +6,7 @@ export type WorkspaceSettings = {
   defaultResolution: "768" | "1024" | "1536";
   projectId?: string;
   projectSlug?: string;
+  defaultPageBackgroundColor?: string;
 };
 
 type SettingsStatus = "idle" | "dirty" | "saving" | "saved";
@@ -18,6 +19,7 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   defaultResolution: "1024",
   projectId: undefined,
   projectSlug: "",
+  defaultPageBackgroundColor: undefined,
 };
 
 function readSettings(): WorkspaceSettings {

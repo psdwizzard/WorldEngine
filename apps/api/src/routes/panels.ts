@@ -8,6 +8,7 @@ import {
   listStoryboardPages,
   createStoryboardPage,
   setActiveStoryboardPage,
+  deleteStoryboardPage,
 } from "../stores/panels";
 import { resolveProjectSlug } from "../lib/projectScope";
 import { getAsset, getAssetBuffer, saveAsset, saveAssetBuffer } from "../services/assetStore";
@@ -42,6 +43,8 @@ const storyboardPanelSchema = z.object({
   renderScale: z.number().finite().positive().optional(),
   renderOffsetX: z.number().finite().optional(),
   renderOffsetY: z.number().finite().optional(),
+  strokeWidth: z.number().finite().min(0).optional(),
+  strokeColor: z.string().optional(),
   prompt: z.string(),
   notes: z.string().optional(),
   order: z.number().int().nonnegative(),
@@ -407,4 +410,20 @@ panelsRouter.post("/pages/:pageId/activate", async (req, res) => {
   }
 
   res.json({ page });
+});
+
+panelsRouter.delete("/pages/:pageId", async (req, res) => {
+  const parsed = pageIdParamSchema.safeParse({ pageId: req.params.pageId });
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid_page_id", issues: parsed.error.flatten() });
+  }
+
+  const projectSlug = resolveProjectSlug(req);
+  const activePage = await deleteStoryboardPage(projectSlug, parsed.data.pageId as UUID);
+  
+  if (!activePage) {
+     return res.status(404).json({ error: "page_not_found" });
+  }
+
+  res.json({ page: activePage });
 });
