@@ -96,6 +96,13 @@ export interface PanelGeometry {
   width: number;
   /** Height of the panel as a percentage of the canvas (0 - 1). */
   height: number;
+  /** Optional offsets for each corner relative to the bounding box (0-1). */
+  cornerOffsets?: {
+    topLeft?: { x: number; y: number };
+    topRight?: { x: number; y: number };
+    bottomLeft?: { x: number; y: number };
+    bottomRight?: { x: number; y: number };
+  };
 }
 
 export interface StoryboardPanel extends PanelPrompt {

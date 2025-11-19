@@ -38,6 +38,7 @@ function sanitizeGeometry(geometry: PanelGeometry): PanelGeometry {
     y,
     width: clamp(width, 0.01, maxWidth <= 0 ? 1 : maxWidth),
     height: clamp(height, 0.01, maxHeight <= 0 ? 1 : maxHeight),
+    cornerOffsets: geometry.cornerOffsets,
   };
 }
 

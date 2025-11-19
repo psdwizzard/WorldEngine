@@ -92,70 +92,159 @@
       "label": "Page 2",
       "width": 1988,
       "height": 3075,
+      "backgroundColor": "#000000",
       "panels": [
-        {
-          "id": "9d139a62-eb07-4fed-a7bb-6e1ee5ae2c0e",
-          "pageId": "8def6545-8a67-40ee-b5d6-b7dd9b972a3f",
-          "label": "Panel 1",
-          "renderScale": 1,
-          "renderOffsetX": 0,
-          "renderOffsetY": 0,
-          "prompt": "",
-          "order": 0,
-          "geometry": {
-            "x": 0,
-            "y": 0,
-            "width": 1,
-            "height": 1
-          },
-          "createdAt": "2025-11-16T21:37:24.687Z",
-          "updatedAt": "2025-11-18T23:02:54.334Z"
-        },
         {
           "id": "e08eac25-48f5-4335-b3f2-30c99f36b778",
           "pageId": "8def6545-8a67-40ee-b5d6-b7dd9b972a3f",
           "label": "Panel 2",
-          "renderAssetId": "14274d3f-2592-4e96-a778-28b30b20d9f3",
-          "renderScale": 2.1435888100000016,
-          "renderOffsetX": 0.0034380875637926404,
-          "renderOffsetY": -0.10607734806629834,
-          "prompt": "",
-          "order": 1,
+          "renderAssetId": "5184f4f0-8445-4af7-92c6-8a178713de94",
+          "renderScale": 2.5937424601000023,
+          "renderOffsetX": 0.08251410153102337,
+          "renderOffsetY": -0.15558011049723758,
+          "strokeWidth": 9,
+          "strokeColor": "#f25050",
+          "prompt": "Can we have the man sleeping in the bed in the same bedroom, he is wearing a sleeveless white shirt",
+          "order": 0,
           "geometry": {
-            "x": 0.03005763512063526,
-            "y": 0.02463689143400638,
+            "x": 0.06929856831907785,
+            "y": 0.7918709255553135,
             "width": 0.5706980594132255,
-            "height": 0.17934095547585555
+            "height": 0.17934095547585555,
+            "cornerOffsets": {
+              "topRight": {
+                "x": -0.057847082494969816,
+                "y": 0
+              }
+            }
           },
           "createdAt": "2025-11-16T21:37:24.687Z",
-          "updatedAt": "2025-11-18T23:02:54.334Z"
+          "updatedAt": "2025-11-18T23:39:49.388Z"
         },
         {
           "id": "2473d2bf-b1b5-445b-98e6-ce767e4d3032",
           "pageId": "8def6545-8a67-40ee-b5d6-b7dd9b972a3f",
           "label": "Panel 3",
-          "renderAssetId": "82e8dc4f-2db5-4728-84ce-134216268aa6",
-          "renderScale": 1,
-          "renderOffsetX": 0,
-          "renderOffsetY": 0,
+          "renderAssetId": "d492a6c8-da2b-415d-8607-e60c6bef1751",
+          "renderScale": 4,
+          "renderOffsetX": 0.03241323203295696,
+          "renderOffsetY": 0.5876316486858296,
           "strokeWidth": 6,
           "strokeColor": "#5900ff",
-          "prompt": "",
-          "order": 2,
+          "prompt": "Can we have the man sleeping in the bed in the same bedroom, he is wearing a sleveless white shirt",
+          "order": 1,
           "geometry": {
-            "x": 0.05,
-            "y": 0.5,
+            "x": 0.020817621018670004,
+            "y": 0.09964268763005316,
             "width": 0.9,
             "height": 0.4
           },
           "createdAt": "2025-11-16T21:37:24.687Z",
-          "updatedAt": "2025-11-18T23:02:54.334Z"
+          "updatedAt": "2025-11-18T23:39:49.388Z"
         }
       ],
       "createdAt": "2025-11-16T21:37:24.687Z",
-      "updatedAt": "2025-11-18T23:02:54.334Z"
+      "updatedAt": "2025-11-18T23:39:49.388Z"
+    },
+    {
+      "id": "3cc7c265-a923-42be-a73e-322e3075fef6",
+      "label": "Page 3",
+      "width": 1988,
+      "height": 3075,
+      "backgroundColor": "#000000",
+      "panels": [
+        {
+          "id": "a8013384-4cd8-4bb6-846e-8a96fef79d4a",
+          "pageId": "3cc7c265-a923-42be-a73e-322e3075fef6",
+          "label": "Panel 1",
+          "renderAssetId": "38fb07d9-bf98-4621-a44e-8190988ae9dd",
+          "renderScale": 2.1435888100000016,
+          "renderOffsetX": 0,
+          "renderOffsetY": 0,
+          "prompt": "[rabbit-human-back] is in the [Bedroom-r].",
+          "order": 0,
+          "geometry": {
+            "x": 0.027109482368036494,
+            "y": 0.04184996677519327,
+            "width": 0.4565995975855132,
+            "height": 0.2,
+            "cornerOffsets": {
+              "bottomRight": {
+                "x": -0.036354823073194265,
+                "y": 0
+              }
+            }
+          },
+          "createdAt": "2025-11-18T23:40:40.520Z",
+          "updatedAt": "2025-11-19T00:31:09.950Z"
+        },
+        {
+          "id": "50d471c3-5e1e-4afa-9377-e80f2caf5a85",
+          "pageId": "3cc7c265-a923-42be-a73e-322e3075fef6",
+          "label": "Panel 2",
+          "renderAssetId": "28dee13d-e317-44ff-b8f0-4fbaf5d33875",
+          "renderScale": 1.9487171000000014,
+          "renderOffsetX": 0,
+          "renderOffsetY": 0,
+          "prompt": "[rabbit-human-back] is in the [Bedroom-r].",
+          "order": 1,
+          "geometry": {
+            "x": 0.4992853549357069,
+            "y": 0.0043757821635312015,
+            "width": 0.46006036217303836,
+            "height": 0.23674796747967455,
+            "cornerOffsets": {
+              "topLeft": {
+                "x": 0.0382680953422261,
+                "y": 0
+              },
+              "topRight": {
+                "x": 0,
+                "y": 0.1552197802197804
+              }
+            }
+          },
+          "createdAt": "2025-11-18T23:40:40.520Z",
+          "updatedAt": "2025-11-19T00:31:09.950Z"
+        },
+        {
+          "id": "1392d2df-69bd-4402-8d38-5dff764ab94c",
+          "pageId": "3cc7c265-a923-42be-a73e-322e3075fef6",
+          "label": "Panel 3",
+          "renderAssetId": "850b1022-64df-4d9e-84ed-288849edf132",
+          "renderScale": 1.771561000000001,
+          "renderOffsetX": 0,
+          "renderOffsetY": 0,
+          "prompt": "[rabbit-human-back] is in the [Bedroom-r].",
+          "order": 2,
+          "geometry": {
+            "x": 0.2606971455942983,
+            "y": 0.6158939190755219,
+            "width": 0.7285382668805508,
+            "height": 0.27597599962366504,
+            "cornerOffsets": {
+              "topLeft": {
+                "x": 0.04695049380836183,
+                "y": 0
+              },
+              "topRight": {
+                "x": -0.10425771419209784,
+                "y": 0.043599879488112774
+              },
+              "bottomRight": {
+                "x": 0,
+                "y": -0.058918756065017286
+              }
+            }
+          },
+          "createdAt": "2025-11-18T23:40:40.520Z",
+          "updatedAt": "2025-11-19T00:31:09.950Z"
+        }
+      ],
+      "createdAt": "2025-11-18T23:40:40.520Z",
+      "updatedAt": "2025-11-19T00:31:09.950Z"
     }
   ],
-  "activePageId": "8def6545-8a67-40ee-b5d6-b7dd9b972a3f",
-  "updatedAt": "2025-11-18T23:02:54.334Z"
+  "activePageId": "3cc7c265-a923-42be-a73e-322e3075fef6",
+  "updatedAt": "2025-11-19T00:31:09.950Z"
 }

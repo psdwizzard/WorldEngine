@@ -30,6 +30,12 @@ const geometrySchema = z.object({
   y: z.number().finite().min(0).max(1),
   width: z.number().finite().min(0.01).max(1),
   height: z.number().finite().min(0.01).max(1),
+  cornerOffsets: z.object({
+    topLeft: z.object({ x: z.number(), y: z.number() }).optional(),
+    topRight: z.object({ x: z.number(), y: z.number() }).optional(),
+    bottomLeft: z.object({ x: z.number(), y: z.number() }).optional(),
+    bottomRight: z.object({ x: z.number(), y: z.number() }).optional(),
+  }).optional(),
 });
 
 const storyboardPanelSchema = z.object({
@@ -264,9 +270,20 @@ panelsRouter.post("/render", async (req, res) => {
       const asset = getAsset(assetId);
       const buffer = await getAssetBuffer(assetId);
       if (asset && buffer) {
+        // Resize single image to target 1024x1024 (contain) to avoid aspect ratio bias
+        const resized = await sharp(buffer)
+          .resize({
+            width: 1024,
+            height: 1024,
+            fit: "contain",
+            background: { r: 0, g: 0, b: 0, alpha: 1 }, // Black background for "void"
+          })
+          .png()
+          .toBuffer();
+
         imageInput = {
-          mimeType: asset.meta.mimeType,
-          data: buffer.toString("base64"),
+          mimeType: "image/png",
+          data: resized.toString("base64"),
         };
       }
     } else if (referenceIds.length > 1) {
@@ -279,9 +296,19 @@ panelsRouter.post("/render", async (req, res) => {
       }
 
       if (buffers.length === 1) {
+        const resized = await sharp(buffers[0])
+          .resize({
+            width: 1024,
+            height: 1024,
+            fit: "contain",
+            background: { r: 0, g: 0, b: 0, alpha: 1 },
+          })
+          .png()
+          .toBuffer();
+
         imageInput = {
           mimeType: "image/png",
-          data: buffers[0].toString("base64"),
+          data: resized.toString("base64"),
         };
       } else if (buffers.length > 1) {
         // Combine multiple reference images into a single stacked image for Gemini.
@@ -310,10 +337,21 @@ panelsRouter.post("/render", async (req, res) => {
           .composite(composites)
           .png()
           .toBuffer();
+        
+        // Force the combined image into a 1024x1024 container
+        const resized = await sharp(combined)
+          .resize({
+             width: 1024,
+             height: 1024,
+             fit: "contain",
+             background: { r: 0, g: 0, b: 0, alpha: 1 },
+          })
+          .png()
+          .toBuffer();
 
         imageInput = {
           mimeType: "image/png",
-          data: combined.toString("base64"),
+          data: resized.toString("base64"),
         };
       }
     }

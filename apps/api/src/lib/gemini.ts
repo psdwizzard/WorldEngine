@@ -31,7 +31,13 @@ export async function generateImage(
   const client = getGeminiClient(env, options?.apiKeyOverride);
   const modelName = request.model ?? DEFAULT_IMAGE_MODEL;
   const model = client.getGenerativeModel({ model: modelName });
-  const promptParts: Array<string | Part> = [request.prompt];
+  const width = request.outputDimensions?.width ?? 512;
+  const height = request.outputDimensions?.height ?? 512;
+
+  // Append resolution instruction to the prompt to override input image aspect ratio
+  const promptWithDimensions = `${request.prompt} \n\nOutput resolution: ${width}x${height}.`;
+
+  const promptParts: Array<string | Part> = [promptWithDimensions];
   if (request.imageInput) {
     promptParts.push({
       inlineData: {
@@ -40,9 +46,6 @@ export async function generateImage(
       },
     });
   }
-
-  const width = request.outputDimensions?.width ?? 512;
-  const height = request.outputDimensions?.height ?? 512;
 
   try {
     console.log(`gemini:generate_image model=${modelName}`);

@@ -267,6 +267,11 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.field.multi.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
 .pane-storyboard {
   max-width: 1280px;
 }
@@ -284,11 +289,36 @@ textarea {
   gap: 1rem;
 }
 
+.layout-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.layout-controls .primary {
+  width: 110px; /* keep Save/Saving/Saved width stable */
+  flex-shrink: 0;
+  justify-content: center;
+  text-align: center;
+}
+
 .layout-page-meta {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
   margin-top: 0.35rem;
+  flex: 1;
+}
+
+.layout-status {
+  font-size: 0.8rem;
+  color: rgba(245, 246, 249, 0.7);
+  min-height: 1.2em; /* keep row height stable as text changes */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .storyboard {
@@ -677,4 +707,14 @@ textarea {
 .prompt-input:focus-visible {
   outline: 2px solid rgba(124, 189, 255, 0.9);
   outline-offset: 3px;
+}
+
+.free-transform-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.corner-controls input[type="number"] {
+  width: 100%;
 }

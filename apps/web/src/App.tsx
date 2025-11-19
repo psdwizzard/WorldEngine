@@ -84,12 +84,17 @@ function clampFraction(value: number, min = 0, max = 1) {
 }
 
 function geometryChanged(a: PanelGeometry, b: PanelGeometry) {
-  return (
+  if (
     Math.abs(a.x - b.x) > 0.0001 ||
     Math.abs(a.y - b.y) > 0.0001 ||
     Math.abs(a.width - b.width) > 0.0001 ||
     Math.abs(a.height - b.height) > 0.0001
-  );
+  ) {
+    return true;
+  }
+
+  // Quick deep equality check for optional cornerOffsets
+  return JSON.stringify(a.cornerOffsets) !== JSON.stringify(b.cornerOffsets);
 }
 
 function moveGeometry(origin: PanelGeometry, dx: number, dy: number): PanelGeometry {
@@ -100,6 +105,7 @@ function moveGeometry(origin: PanelGeometry, dx: number, dy: number): PanelGeome
     y,
     width: origin.width,
     height: origin.height,
+    cornerOffsets: origin.cornerOffsets,
   };
 }
 
@@ -133,6 +139,7 @@ function resizeGeometry(origin: PanelGeometry, dx: number, dy: number, corner: R
     y: top,
     width,
     height,
+    cornerOffsets: origin.cornerOffsets,
   };
 }
 
@@ -2831,9 +2838,44 @@ function PanelsTab({
         const drawX = centerX - drawW / 2 + offsetX * panelW;
         const drawY = centerY - drawH / 2 + offsetY * panelH;
 
+        const offsets = panel.geometry.cornerOffsets;
+
         ctx.save();
         ctx.beginPath();
-        ctx.rect(panelX, panelY, panelW, panelH);
+
+        if (offsets) {
+          // Offsets are stored as fractions of the panel's own width/height.
+          const off = (c: { x: number; y: number } | undefined) => ({
+            x: (c?.x ?? 0) * panelW,
+            y: (c?.y ?? 0) * panelH,
+          });
+
+          const tl = {
+            x: panelX + off(offsets.topLeft).x,
+            y: panelY + off(offsets.topLeft).y,
+          };
+          const tr = {
+            x: panelX + panelW + off(offsets.topRight).x,
+            y: panelY + off(offsets.topRight).y,
+          };
+          const br = {
+            x: panelX + panelW + off(offsets.bottomRight).x,
+            y: panelY + panelH + off(offsets.bottomRight).y,
+          };
+          const bl = {
+            x: panelX + off(offsets.bottomLeft).x,
+            y: panelY + panelH + off(offsets.bottomLeft).y,
+          };
+
+          ctx.moveTo(tl.x, tl.y);
+          ctx.lineTo(tr.x, tr.y);
+          ctx.lineTo(br.x, br.y);
+          ctx.lineTo(bl.x, bl.y);
+          ctx.closePath();
+        } else {
+          ctx.rect(panelX, panelY, panelW, panelH);
+        }
+
         ctx.clip();
         ctx.drawImage(img, drawX, drawY, drawW, drawH);
         ctx.restore();
@@ -2841,7 +2883,39 @@ function PanelsTab({
         if (panel.strokeWidth && panel.strokeWidth > 0) {
           ctx.save();
           ctx.beginPath();
-          ctx.rect(panelX, panelY, panelW, panelH);
+          
+          if (offsets) {
+            const off = (c: { x: number; y: number } | undefined) => ({
+              x: (c?.x ?? 0) * panelW,
+              y: (c?.y ?? 0) * panelH,
+            });
+
+            const tl = {
+              x: panelX + off(offsets.topLeft).x,
+              y: panelY + off(offsets.topLeft).y,
+            };
+            const tr = {
+              x: panelX + panelW + off(offsets.topRight).x,
+              y: panelY + off(offsets.topRight).y,
+            };
+            const br = {
+              x: panelX + panelW + off(offsets.bottomRight).x,
+              y: panelY + panelH + off(offsets.bottomRight).y,
+            };
+            const bl = {
+              x: panelX + off(offsets.bottomLeft).x,
+              y: panelY + panelH + off(offsets.bottomLeft).y,
+            };
+
+            ctx.moveTo(tl.x, tl.y);
+            ctx.lineTo(tr.x, tr.y);
+            ctx.lineTo(br.x, br.y);
+            ctx.lineTo(bl.x, bl.y);
+            ctx.closePath();
+          } else {
+            ctx.rect(panelX, panelY, panelW, panelH);
+          }
+
           ctx.lineWidth = panel.strokeWidth;
           ctx.strokeStyle = panel.strokeColor ?? "#000000";
           ctx.stroke();
@@ -2962,6 +3036,143 @@ function PanelsTab({
     [selectedPanel, updatePanel],
   );
 
+  const handleCornerOffsetChange = useCallback(
+    (
+      corner: "topLeft" | "topRight" | "bottomLeft" | "bottomRight",
+      axis: "x" | "y",
+      valuePxOutward: number,
+    ) => {
+      if (!selectedPanel || !page) return;
+      if (!Number.isFinite(valuePxOutward)) return;
+
+      const panelWidthPx = page.width * selectedPanel.geometry.width;
+      const panelHeightPx = page.height * selectedPanel.geometry.height;
+
+      // Treat positive values as "push this corner outward" relative to the panel.
+      // Left corners: outward X is negative; right corners: outward X is positive.
+      // Top corners: outward Y is negative; bottom corners: outward Y is positive.
+      const outwardX = corner === "topLeft" || corner === "bottomLeft" ? -1 : 1;
+      const outwardY = corner === "topLeft" || corner === "topRight" ? -1 : 1;
+      const sign = axis === "x" ? outwardX : outwardY;
+
+      const dimension = axis === "x" ? panelWidthPx : panelHeightPx;
+      if (!Number.isFinite(dimension) || dimension <= 0) return;
+
+      // Store offsets as a fraction of the panel's own width/height.
+      const normalizedDelta = (valuePxOutward * sign) / dimension;
+
+      const geometry = selectedPanel.geometry;
+      const currentOffsets = geometry.cornerOffsets ?? {};
+      const currentCorner = currentOffsets[corner] ?? { x: 0, y: 0 };
+      const nextCorner = { ...currentCorner, [axis]: normalizedDelta };
+
+      const offsetsWithCorner = { ...currentOffsets, [corner]: nextCorner };
+
+      // Compute the polygon in the current panel-local coordinate space.
+      const tlOffset = offsetsWithCorner.topLeft ?? { x: 0, y: 0 };
+      const trOffset = offsetsWithCorner.topRight ?? { x: 0, y: 0 };
+      const brOffset = offsetsWithCorner.bottomRight ?? { x: 0, y: 0 };
+      const blOffset = offsetsWithCorner.bottomLeft ?? { x: 0, y: 0 };
+
+      const tlLocal = { x: 0 + tlOffset.x, y: 0 + tlOffset.y };
+      const trLocal = { x: 1 + trOffset.x, y: 0 + trOffset.y };
+      const brLocal = { x: 1 + brOffset.x, y: 1 + brOffset.y };
+      const blLocal = { x: 0 + blOffset.x, y: 1 + blOffset.y };
+
+      const minX = Math.min(tlLocal.x, trLocal.x, brLocal.x, blLocal.x);
+      const maxX = Math.max(tlLocal.x, trLocal.x, brLocal.x, blLocal.x);
+      const minY = Math.min(tlLocal.y, trLocal.y, brLocal.y, blLocal.y);
+      const maxY = Math.max(tlLocal.y, trLocal.y, brLocal.y, blLocal.y);
+
+      const scaleX = maxX - minX;
+      const scaleY = maxY - minY;
+      if (scaleX <= 0 || scaleY <= 0) {
+        return;
+      }
+
+      // Expand the panel's geometry so the new polygon fits inside the bounding box.
+      const newGeometry: PanelGeometry = {
+        x: geometry.x + geometry.width * minX,
+        y: geometry.y + geometry.height * minY,
+        width: geometry.width * scaleX,
+        height: geometry.height * scaleY,
+        cornerOffsets: undefined, // will be re-normalized below
+      };
+
+      // Re-normalize offsets into the new 0-1 local space.
+      const renormalize = (local: { x: number; y: number }): { x: number; y: number } => ({
+        x: (local.x - minX) / scaleX,
+        y: (local.y - minY) / scaleY,
+      });
+
+      const tlNorm = renormalize(tlLocal);
+      const trNorm = renormalize(trLocal);
+      const brNorm = renormalize(brLocal);
+      const blNorm = renormalize(blLocal);
+
+      const nextOffsets: NonNullable<PanelGeometry["cornerOffsets"]> = {};
+
+      const addIfNonZero = (
+        key: keyof NonNullable<PanelGeometry["cornerOffsets"]>,
+        base: { x: number; y: number },
+        local: { x: number; y: number },
+      ) => {
+        const delta = { x: local.x - base.x, y: local.y - base.y };
+        if (delta.x !== 0 || delta.y !== 0) {
+          nextOffsets[key] = delta;
+        }
+      };
+
+      addIfNonZero("topLeft", { x: 0, y: 0 }, tlNorm);
+      addIfNonZero("topRight", { x: 1, y: 0 }, trNorm);
+      addIfNonZero("bottomRight", { x: 1, y: 1 }, brNorm);
+      addIfNonZero("bottomLeft", { x: 0, y: 1 }, blNorm);
+
+      const hasOffsets = Object.keys(nextOffsets).length > 0;
+
+      updateGeometry(selectedPanel.id, {
+        ...newGeometry,
+        cornerOffsets: hasOffsets ? nextOffsets : undefined,
+      });
+    },
+    [page, selectedPanel, updateGeometry],
+  );
+
+  const renderPanelStyle = (panel: StoryboardPanel) => {
+    const style: React.CSSProperties = {
+      left: `${panel.geometry.x * 100}%`,
+      top: `${panel.geometry.y * 100}%`,
+      width: `${panel.geometry.width * 100}%`,
+      height: `${panel.geometry.height * 100}%`,
+    };
+
+    const offsets = panel.geometry.cornerOffsets;
+    if (offsets) {
+      // Compute polygon points in % relative to the bounding box
+      // The bounding box is 0,0 to 100,100 in its own coordinate space
+      // Offsets are normalized relative to page size, so we need to convert to % of panel size
+      
+      // x_percent = (offset_x_normalized / panel_width_normalized) * 100
+      const toPercentX = (val: number) => (val / panel.geometry.width) * 100;
+      const toPercentY = (val: number) => (val / panel.geometry.height) * 100;
+
+      const tl = { x: 0 + toPercentX(offsets.topLeft?.x ?? 0), y: 0 + toPercentY(offsets.topLeft?.y ?? 0) };
+      const tr = { x: 100 + toPercentX(offsets.topRight?.x ?? 0), y: 0 + toPercentY(offsets.topRight?.y ?? 0) };
+      const br = { x: 100 + toPercentX(offsets.bottomRight?.x ?? 0), y: 100 + toPercentY(offsets.bottomRight?.y ?? 0) };
+      const bl = { x: 0 + toPercentX(offsets.bottomLeft?.x ?? 0), y: 100 + toPercentY(offsets.bottomLeft?.y ?? 0) };
+
+      style.clipPath = `polygon(${tl.x}% ${tl.y}%, ${tr.x}% ${tr.y}%, ${br.x}% ${br.y}%, ${bl.x}% ${bl.y}%)`;
+    } else {
+       style.borderWidth = panel.strokeWidth ? `${panel.strokeWidth}px` : undefined;
+       style.borderColor = panel.strokeColor;
+       style.borderStyle = panel.strokeWidth ? "solid" : undefined;
+    }
+
+    return style;
+  };
+
+  const isFreeMode = Boolean(selectedPanel?.geometry.cornerOffsets);
+
   return (
     <div className="pane pane-storyboard">
       <div className="pane-header">
@@ -3079,19 +3290,15 @@ function PanelsTab({
             )}
             {page &&
               status !== "loading" &&
-              page.panels.map((panel) => (
+              page.panels.map((panel) => {
+                const style = renderPanelStyle(panel);
+                const offsets = panel.geometry.cornerOffsets;
+
+                return (
                 <div
                   key={panel.id}
                   className={selectedPanelId === panel.id ? "storyboard-panel is-selected" : "storyboard-panel"}
-                  style={{
-                    left: `${panel.geometry.x * 100}%`,
-                    top: `${panel.geometry.y * 100}%`,
-                    width: `${panel.geometry.width * 100}%`,
-                    height: `${panel.geometry.height * 100}%`,
-                    borderWidth: panel.strokeWidth ? `${panel.strokeWidth}px` : undefined,
-                    borderColor: panel.strokeColor,
-                    borderStyle: panel.strokeWidth ? "solid" : undefined,
-                  }}
+                  style={style}
                   onPointerDown={editingPanelId === panel.id ? undefined : beginMove(panel.id)}
                   onDoubleClick={() => {
                     setEditingPanelId(panel.id);
@@ -3112,6 +3319,39 @@ function PanelsTab({
                       onPointerDown={editingPanelId === panel.id ? beginImagePan(panel.id) : undefined}
                     />
                   )}
+                  
+                  {offsets && panel.strokeWidth && panel.strokeWidth > 0 && (
+                     <svg 
+                       className="panel-stroke-overlay" 
+                       viewBox="0 0 100 100" 
+                       preserveAspectRatio="none"
+                       style={{
+                         position: "absolute",
+                         top: 0,
+                         left: 0,
+                         width: "100%",
+                         height: "100%",
+                         pointerEvents: "none",
+                         overflow: "visible"
+                       }}
+                     >
+                       <polygon
+                         points={`
+                           ${0 + (offsets.topLeft?.x ?? 0) / panel.geometry.width * 100},${0 + (offsets.topLeft?.y ?? 0) / panel.geometry.height * 100} 
+                           ${100 + (offsets.topRight?.x ?? 0) / panel.geometry.width * 100},${0 + (offsets.topRight?.y ?? 0) / panel.geometry.height * 100} 
+                           ${100 + (offsets.bottomRight?.x ?? 0) / panel.geometry.width * 100},${100 + (offsets.bottomRight?.y ?? 0) / panel.geometry.height * 100} 
+                           ${0 + (offsets.bottomLeft?.x ?? 0) / panel.geometry.width * 100},${100 + (offsets.bottomLeft?.y ?? 0) / panel.geometry.height * 100}
+                         `}
+                         fill="none"
+                         stroke={panel.strokeColor ?? "#000000"}
+                         strokeWidth={panel.strokeWidth ? (panel.strokeWidth / (page.width * panel.geometry.width)) * 100 : 0} // This is an approximation, real SVG stroke width is complex with non-uniform scaling.
+                         // Better approach for stroke: vector-effect="non-scaling-stroke" but that requires unscaled coordinate space.
+                         // Let's stick to simple scaling for now or assume uniform aspect.
+                         vectorEffect="non-scaling-stroke"
+                       />
+                     </svg>
+                  )}
+
                   <span className="panel-label">{panel.label || "Untitled panel"}</span>
                   <span className="panel-order">#{panel.order + 1}</span>
                   <div className="panel-handle handle-nw" onPointerDown={beginResize(panel.id, "nw")} aria-hidden />
@@ -3186,7 +3426,8 @@ function PanelsTab({
                     </div>
                   )}
                 </div>
-              ))}
+              );})
+            }
           </div>
         </div>
         <form className="storyboard-form" onSubmit={(event) => event.preventDefault()}>
@@ -3371,6 +3612,81 @@ function PanelsTab({
                 </button>
                 {!collapsedSections.panel && (
                   <>
+                    <div className="field">
+                      <label className="checkbox">
+                        <input
+                          type="checkbox"
+                          checked={isFreeMode}
+                          onChange={(e) => {
+                            // Toggle free mode: if turning on, init empty offsets. If turning off, clear them.
+                            updateGeometry(selectedPanel.id, {
+                              ...selectedPanel.geometry,
+                              cornerOffsets: e.target.checked ? {} : undefined,
+                            });
+                          }}
+                        />
+                        Free Panel Shape
+                      </label>
+                    </div>
+                    
+                    {isFreeMode && page && (
+                      <div className="free-transform-grid">
+                        {["topLeft", "topRight", "bottomLeft", "bottomRight"].map((cornerKey) => {
+                          const corner = cornerKey as keyof NonNullable<PanelGeometry["cornerOffsets"]>;
+                          const current = selectedPanel.geometry.cornerOffsets?.[corner] ?? { x: 0, y: 0 };
+
+                          const panelWidthPx = page.width * selectedPanel.geometry.width;
+                          const panelHeightPx = page.height * selectedPanel.geometry.height;
+
+                          // Map stored offsets to "outward" pixels so positive numbers
+                          // always mean pushing the corner outward from the current panel.
+                          const outwardX =
+                            corner === "topLeft" || corner === "bottomLeft" ? -1 : 1;
+                          const outwardY =
+                            corner === "topLeft" || corner === "topRight" ? -1 : 1;
+
+                          const rawPxX = current.x * panelWidthPx * outwardX;
+                          const rawPxY = current.y * panelHeightPx * outwardY;
+                          const pxX = Number.isFinite(rawPxX) ? Math.round(rawPxX) : 0;
+                          const pxY = Number.isFinite(rawPxY) ? Math.round(rawPxY) : 0;
+
+                          return (
+                            <div key={corner} className="corner-controls">
+                              <strong>{corner.replace(/([A-Z])/g, " $1").trim()}</strong>
+                              <div className="field multi compact">
+                                <label>
+                                  X
+                                  <input
+                                    type="number"
+                                    value={pxX}
+                                    onChange={(e) => {
+                                      const next = Number(e.target.value);
+                                      if (!Number.isFinite(next)) return;
+                                      handleCornerOffsetChange(corner, "x", next);
+                                    }}
+                                  />
+                                </label>
+                                <label>
+                                  Y
+                                  <input
+                                    type="number"
+                                    value={pxY}
+                                    onChange={(e) => {
+                                      const next = Number(e.target.value);
+                                      if (!Number.isFinite(next)) return;
+                                      handleCornerOffsetChange(corner, "y", next);
+                                    }}
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {!isFreeMode && (
+                      <>
                     <div className="panel-coordinates">
                       <span>X {(selectedPanel.geometry.x * 100).toFixed(1)}%</span>
                       <span>Y {(selectedPanel.geometry.y * 100).toFixed(1)}%</span>
@@ -3401,6 +3717,8 @@ function PanelsTab({
                         />
                       </div>
                     </div>
+                    </>
+                    )}
                     <div className="field multi">
                       <div className="field">
                         <label htmlFor="panel-stroke-width">Stroke width (px)</label>
