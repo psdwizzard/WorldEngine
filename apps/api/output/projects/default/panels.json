@@ -1,0 +1,61 @@
+{
+  "pages": [
+    {
+      "id": "5081bac1-c3c4-4808-82db-8b4fcf4baeb8",
+      "label": "Page 1",
+      "width": 1988,
+      "height": 3075,
+      "panels": [
+        {
+          "id": "27b2c3ce-76b5-4902-8f1a-6990c5bb072a",
+          "pageId": "5081bac1-c3c4-4808-82db-8b4fcf4baeb8",
+          "label": "Panel 1",
+          "prompt": "",
+          "order": 0,
+          "geometry": {
+            "x": 0.05,
+            "y": 0.05,
+            "width": 0.4,
+            "height": 0.4
+          },
+          "createdAt": "2025-11-18T16:59:27.541Z",
+          "updatedAt": "2025-11-18T16:59:27.541Z"
+        },
+        {
+          "id": "640ad30f-daf8-4bd2-a184-1ea57907edf3",
+          "pageId": "5081bac1-c3c4-4808-82db-8b4fcf4baeb8",
+          "label": "Panel 2",
+          "prompt": "",
+          "order": 1,
+          "geometry": {
+            "x": 0.55,
+            "y": 0.05,
+            "width": 0.4,
+            "height": 0.4
+          },
+          "createdAt": "2025-11-18T16:59:27.541Z",
+          "updatedAt": "2025-11-18T16:59:27.541Z"
+        },
+        {
+          "id": "0ad731d6-8a73-472f-9899-a0ee9c90c42f",
+          "pageId": "5081bac1-c3c4-4808-82db-8b4fcf4baeb8",
+          "label": "Panel 3",
+          "prompt": "",
+          "order": 2,
+          "geometry": {
+            "x": 0.05,
+            "y": 0.5,
+            "width": 0.9,
+            "height": 0.4
+          },
+          "createdAt": "2025-11-18T16:59:27.541Z",
+          "updatedAt": "2025-11-18T16:59:27.541Z"
+        }
+      ],
+      "createdAt": "2025-11-18T16:59:27.541Z",
+      "updatedAt": "2025-11-18T16:59:27.541Z"
+    }
+  ],
+  "activePageId": "5081bac1-c3c4-4808-82db-8b4fcf4baeb8",
+  "updatedAt": "2025-11-18T16:59:27.541Z"
+}
