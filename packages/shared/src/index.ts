@@ -1,5 +1,13 @@
 ﻿export type UUID = string;
 
+export const PANEL_RENDER_MODEL_VALUES = ["nano-banana", "nano-banana-pro"] as const;
+export type PanelRenderModel = (typeof PANEL_RENDER_MODEL_VALUES)[number];
+
+export const PANEL_RENDER_MODEL_LABELS: Record<PanelRenderModel, string> = {
+  "nano-banana": "Nano Banana",
+  "nano-banana-pro": "Nano Banana Pro",
+};
+
 export type CharacterAngle = "front" | "left" | "right" | "back" | "side" | "three-quarter";
 
 export interface AssetReference {
@@ -123,7 +131,7 @@ export interface StoryboardPage {
 
 export interface GeminiGenerationRequest {
   prompt: string;
-  model?: string;
+  model?: PanelRenderModel;
   imageInput?: {
     mimeType: string;
     data: string;

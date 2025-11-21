@@ -4,7 +4,7 @@ import type { EnvConfig } from "./env";
 import type { GeminiGenerationRequest } from "@worldengine/shared";
 
 let client: GoogleGenerativeAI | null = null;
-const DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image";
+export const DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image";
 
 export function getGeminiClient(env: EnvConfig, apiKeyOverride?: string) {
   // If a per-request key is provided, use a non-cached client for that key.

@@ -37,13 +37,52 @@ async function loadManifest() {
     const contents = await readFile(manifestPath, "utf8");
     const payload = JSON.parse(contents) as AssetManifest;
     registry.clear();
+
+    let hasChanges = false;
+
     payload.forEach((asset) => {
+      let filePath = asset.filePath;
+
+      // Migration: Convert absolute paths to relative
+      if (path.isAbsolute(filePath)) {
+        // Try to make it relative to the current uploadsRoot
+        // We assume the absolute path points to the same location as we expect
+        // If the file doesn't exist there, we might have a problem, but for now we just convert the string.
+        // However, if the project MOVED, the absolute path might be wrong.
+        // But the user said "if I move this project, it doesn't break".
+        // So we assume we are currently in a state where we might want to fix it.
+        // Actually, if the user ALREADY moved it, the absolute path is invalid.
+        // But we can try to recover it if it follows the structure.
+
+        // The structure seems to be .../projects/<slug>/...
+        // We can try to find "projects" in the path and take everything after it.
+        const parts = filePath.split(path.sep);
+        const projectsIndex = parts.lastIndexOf("projects");
+        if (projectsIndex !== -1 && projectsIndex < parts.length - 1) {
+          filePath = parts.slice(projectsIndex + 1).join(path.sep);
+          hasChanges = true;
+        } else {
+          // Fallback: try standard relative if it happens to match our current root
+          const relative = path.relative(uploadsRoot, filePath);
+          if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
+            filePath = relative;
+            hasChanges = true;
+          }
+        }
+      }
+
       const normalized = {
         ...asset,
-        filePath: asset.filePath,
+        filePath: filePath,
       } as StoredAsset;
       registry.set(normalized.id, normalized);
     });
+
+    if (hasChanges) {
+      console.log("Migrated asset paths to relative paths.");
+      await persistManifest();
+    }
+
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       console.error("assetStore:manifest_read_failed", error);
@@ -87,8 +126,10 @@ export async function saveAsset(
   const assetId = randomUUID();
   const extension = path.extname(file.originalname) || ".bin";
   const filename = `${assetId}${extension}`;
-  const filePath = path.join(destinationDir, filename);
-  await writeFile(filePath, file.buffer);
+  const fullPath = path.join(destinationDir, filename);
+  await writeFile(fullPath, file.buffer);
+
+  const relativePath = path.relative(uploadsRoot, fullPath);
 
   return register({
     id: assetId,
@@ -96,7 +137,7 @@ export async function saveAsset(
     mimeType: file.mimetype || "application/octet-stream",
     width: 0,
     height: 0,
-    filePath,
+    filePath: relativePath,
     originalName: file.originalname,
     size: file.size,
     projectSlug: normalizeProjectSlug(projectSlug ?? DEFAULT_PROJECT_SLUG),
@@ -123,8 +164,10 @@ export async function saveAssetBuffer(
 
   const assetId = randomUUID();
   const filename = options.filename ?? `${assetId}.bin`;
-  const filePath = path.join(destinationDir, filename);
-  await writeFile(filePath, buffer);
+  const fullPath = path.join(destinationDir, filename);
+  await writeFile(fullPath, buffer);
+
+  const relativePath = path.relative(uploadsRoot, fullPath);
 
   return register({
     id: assetId,
@@ -132,7 +175,7 @@ export async function saveAssetBuffer(
     mimeType: options.mimeType,
     width: 0,
     height: 0,
-    filePath,
+    filePath: relativePath,
     originalName: options.filename ?? filename,
     size: buffer.byteLength,
     aiDescription: options.aiDescription,
@@ -145,9 +188,11 @@ export function getAsset(assetId: string) {
   const asset = registry.get(assetId);
   if (!asset) return null;
 
+  const fullPath = path.resolve(uploadsRoot, asset.filePath);
+
   return {
     meta: asset,
-    stream: createReadStream(asset.filePath),
+    stream: createReadStream(fullPath),
   };
 }
 
@@ -155,8 +200,10 @@ export async function getAssetBuffer(assetId: string): Promise<Buffer | null> {
   const asset = registry.get(assetId);
   if (!asset) return null;
 
+  const fullPath = path.resolve(uploadsRoot, asset.filePath);
+
   try {
-    return await readFile(asset.filePath);
+    return await readFile(fullPath);
   } catch (error) {
     console.error(`Failed to read asset ${assetId}:`, error);
     return null;

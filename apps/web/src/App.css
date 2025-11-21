@@ -267,6 +267,17 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.panel-generation-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.panel-generation-buttons button {
+  flex: 1 1 220px;
+  min-width: 220px;
+}
+
 .field.multi.compact {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.5rem;
@@ -466,6 +477,26 @@ textarea {
   gap: 1rem;
 }
 
+.project-library {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.project-library-header h3 {
+  margin: 0;
+}
+
+.project-library-header .helper-text {
+  margin: 0;
+}
+
+label.upload.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .library-card {
   border-radius: 1rem;
   padding: 0.75rem;
@@ -506,6 +537,29 @@ textarea {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.25rem;
+}
+
+.library-target-selects {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.library-target-selects label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: rgba(245, 246, 249, 0.75);
+}
+
+.library-target-selects select {
+  border-radius: 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(13, 18, 28, 0.9);
+  color: inherit;
+  padding: 0.35rem 0.45rem;
 }
 
 .storyboard-form {

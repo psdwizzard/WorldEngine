@@ -63,6 +63,8 @@ Provide the Gemini key one of two ways:
 
 The API prefers the header; if missing, it falls back to `.env.local`.
 
+> `apps/api/.env.local` is ignored via the repo `.gitignore`, so the key never becomes part of your Git history. Keep the real value only in that file (or in process env vars) and *never* inside tracked source files. If you suspect a secret was committed previously, rotate it in the Google Cloud console and then run `git push --force-with-lease` after rewriting history (e.g., via `git filter-repo`) to scrub the old value.
+
 ---
 
 ## 3. Projects, Settings, and Persistence

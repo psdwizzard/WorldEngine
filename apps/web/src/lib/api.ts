@@ -6,6 +6,7 @@ import type {
   ItemAngle,
   ItemReference,
   LocationBlueprint,
+  PanelRenderModel,
   StoryboardPage,
   StoryboardPanel,
   UUID,
@@ -641,6 +642,7 @@ export async function renderPanelImage(input: {
   prompt: string;
   referenceAssetId?: UUID;
   referenceAssetIds?: UUID[];
+  model?: PanelRenderModel;
   geminiKey?: string;
   projectSlug?: string;
 }): Promise<{ page: StoryboardPage; panel: StoryboardPanel; asset: AssetReference }> {
@@ -655,6 +657,7 @@ export async function renderPanelImage(input: {
       prompt: input.prompt,
       referenceAssetId: input.referenceAssetId,
       referenceAssetIds: input.referenceAssetIds,
+      model: input.model,
     }),
   });
 

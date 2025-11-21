@@ -11,6 +11,8 @@ const envSchema = z.object({
   JSON_LIMIT_MB: z.coerce.number().int().positive().default(25),
   DATA_ROOT: z.string().default(DEFAULT_DATA_ROOT),
   GEMINI_API_KEY: z.string().min(1).optional(),
+  NANO_BANANA_MODEL: z.string().optional(),
+  NANO_BANANA_PRO_MODEL: z.string().optional(),
 });
 
 export type EnvConfig = z.infer<typeof envSchema> & {

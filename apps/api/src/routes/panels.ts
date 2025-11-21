@@ -1,7 +1,8 @@
 ﻿import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
-import type { PanelPrompt, StoryboardPage, StoryboardPanel, UUID } from "@worldengine/shared";
+import type { PanelPrompt, PanelRenderModel, StoryboardPage, StoryboardPanel, UUID } from "@worldengine/shared";
+import { PANEL_RENDER_MODEL_VALUES } from "@worldengine/shared";
 import {
   getActivePage,
   saveStoryboardPage,
@@ -14,6 +15,7 @@ import { resolveProjectSlug } from "../lib/projectScope";
 import { getAsset, getAssetBuffer, saveAsset, saveAssetBuffer } from "../services/assetStore";
 import sharp from "sharp";
 import { loadEnv } from "../lib/env";
+import type { EnvConfig } from "../lib/env";
 import { upload } from "../middleware/upload";
 
 const panelPayload = z.object({
@@ -78,12 +80,34 @@ const deletePanelSchema = z.object({
   panelId: z.string().uuid(),
 });
 
+const panelRenderModelSchema = z.enum(PANEL_RENDER_MODEL_VALUES);
+
 const renderPanelSchema = z.object({
   panelId: z.string().uuid(),
   prompt: z.string().min(1),
   referenceAssetId: z.string().uuid().optional(),
   referenceAssetIds: z.array(z.string().uuid()).optional(),
+  model: panelRenderModelSchema.optional(),
 });
+
+const DEFAULT_PANEL_RENDER_MODEL: PanelRenderModel = "nano-banana";
+
+function resolvePanelRenderModel(
+  requested: PanelRenderModel | undefined,
+  env: EnvConfig,
+  fallbackModel: string,
+): string {
+  const model = requested ?? DEFAULT_PANEL_RENDER_MODEL;
+  if (model === "nano-banana") {
+    return env.NANO_BANANA_MODEL ?? fallbackModel;
+  }
+
+  if (model === "nano-banana-pro") {
+    return env.NANO_BANANA_PRO_MODEL ?? env.NANO_BANANA_MODEL ?? fallbackModel;
+  }
+
+  return fallbackModel;
+}
 
 const pageIdParamSchema = z.object({
   pageId: z.string().uuid(),
@@ -248,7 +272,7 @@ panelsRouter.post("/render", async (req, res) => {
   }
 
   try {
-    const { generateImage } = await import("../lib/gemini");
+    const { generateImage, DEFAULT_IMAGE_MODEL } = await import("../lib/gemini");
     const env = loadEnv();
 
     let imageInput: { mimeType: string; data: string } | undefined;
@@ -356,9 +380,12 @@ panelsRouter.post("/render", async (req, res) => {
       }
     }
 
+    const targetModel = resolvePanelRenderModel(parsed.data.model, env, DEFAULT_IMAGE_MODEL);
+
     const generationRequest = {
       prompt: parsed.data.prompt,
       imageInput,
+      model: targetModel,
       outputDimensions: {
         width: 1024,
         height: 1024,

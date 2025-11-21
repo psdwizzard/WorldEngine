@@ -8,12 +8,14 @@ import type {
   LocationBlueprint,
   LocationSpot,
   PanelGeometry,
+  PanelRenderModel,
   ProjectSummary,
   PromptPresetSet,
   StoryboardPage,
   StoryboardPanel,
   UUID,
 } from "@worldengine/shared";
+import { PANEL_RENDER_MODEL_LABELS } from "@worldengine/shared";
 import { useSettings } from "./hooks/useSettings";
 import {
   apiBaseUrl,
@@ -1949,13 +1951,17 @@ function PanelsTab({
   const [autoPrompt, setAutoPrompt] = useState<string>("");
   const [editingPanelId, setEditingPanelId] = useState<UUID | null>(null);
   const [panelLibraryUploading, setPanelLibraryUploading] = useState<Record<UUID, boolean>>({});
-  const [subTab, setSubTab] = useState<"layout" | "library">("layout");
+  const [projectLibraryTargets, setProjectLibraryTargets] = useState<
+    Record<UUID, { pageId: UUID | ""; panelId: UUID | "" }>
+  >({});
+  const [subTab, setSubTab] = useState<"layout" | "library" | "project-library">("layout");
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
     references: false,
     page: false,
     panel: false,
     generation: false,
   });
+  const [renderModelInFlight, setRenderModelInFlight] = useState<PanelRenderModel | null>(null);
 
   const markDirty = useCallback(() => {
     setHasChanges(true);
@@ -2418,6 +2424,22 @@ function PanelsTab({
     return "Drag panels or update metadata";
   }, [status, error, hasChanges]);
 
+  const renderButtonDisabled =
+    !selectedPanel ||
+    !selectedPanel.prompt ||
+    selectedPanel.prompt.trim().length === 0 ||
+    status === "loading" ||
+    status === "saving" ||
+    status === "generating";
+
+  const renderButtonLabel = (model: PanelRenderModel) => {
+    const label = PANEL_RENDER_MODEL_LABELS[model] ?? "Nano Banana";
+    if (status === "generating" && renderModelInFlight === model) {
+      return `Generating with ${label}...`;
+    }
+    return `Generate Panel Image with ${label}`;
+  };
+
   const handleLabelChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
       if (!selectedPanel) return;
@@ -2765,7 +2787,21 @@ function PanelsTab({
           geminiKey: settings.geminiKey,
           projectSlug: settings.projectSlug,
         });
-        setPage(result.page);
+        setPage((current) => {
+          if (current?.id === result.page.id) {
+            return result.page;
+          }
+          return current;
+        });
+        setPages((previous) => {
+          const index = previous.findIndex((candidate) => candidate.id === result.page.id);
+          if (index === -1) {
+            return [...previous, result.page];
+          }
+          const next = [...previous];
+          next.splice(index, 1, result.page);
+          return next;
+        });
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Failed to replace panel image");
         setStatus("error");
@@ -2943,7 +2979,7 @@ function PanelsTab({
     }
   }, [page]);
 
-  const handleRenderSelectedPanel = useCallback(async () => {
+  const handleRenderSelectedPanel = useCallback(async (model: PanelRenderModel = "nano-banana") => {
     if (!selectedPanel || !selectedPanel.prompt || selectedPanel.prompt.trim().length === 0) {
       setError("Add a prompt for the selected panel before generating an image.");
       return;
@@ -2991,6 +3027,7 @@ function PanelsTab({
 
     const effectiveReferenceAssetId = primaryReferenceAssetId ?? referenceAssetIds[0];
 
+    setRenderModelInFlight(model);
     setStatus("generating");
     setError(null);
 
@@ -3000,6 +3037,7 @@ function PanelsTab({
         prompt: selectedPanel.prompt,
         referenceAssetId: effectiveReferenceAssetId,
         referenceAssetIds: referenceAssetIds.length > 0 ? referenceAssetIds : undefined,
+        model,
         geminiKey: settings.geminiKey,
         projectSlug: settings.projectSlug,
       });
@@ -3008,6 +3046,8 @@ function PanelsTab({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to generate panel image");
       setStatus("error");
+    } finally {
+      setRenderModelInFlight(null);
     }
   }, [
     characterSelection,
@@ -3017,6 +3057,7 @@ function PanelsTab({
     selectedPanel,
     settings.geminiKey,
     settings.projectSlug,
+    setRenderModelInFlight,
   ]);
 
   const handleStrokeWidthChange = useCallback(
@@ -3173,6 +3214,82 @@ function PanelsTab({
 
   const isFreeMode = Boolean(selectedPanel?.geometry.cornerOffsets);
 
+  const allPages = useMemo(() => {
+    const map = new Map<UUID, StoryboardPage>();
+    pages.forEach((candidate) => map.set(candidate.id, candidate));
+    if (page) {
+      map.set(page.id, page);
+    }
+    return Array.from(map.values()).sort((a, b) => (a.label || "").localeCompare(b.label || ""));
+  }, [page, pages]);
+
+  const pageLookup = useMemo(() => new Map(allPages.map((candidate) => [candidate.id, candidate])), [allPages]);
+
+  const projectLibraryPanels = useMemo(() => {
+    type ProjectLibraryEntry = {
+      panel: StoryboardPanel;
+      pageId: UUID;
+      pageLabel: string;
+      pageOrder: number;
+      panelOrder: number;
+      updatedAt?: string;
+    };
+
+    const entries = new Map<UUID, ProjectLibraryEntry>();
+
+    const registerPage = (candidate: StoryboardPage | null | undefined, indexFallback: number) => {
+      if (!candidate) return;
+      const panelList = candidate.panels ?? [];
+      panelList.forEach((panel, panelIndex) => {
+        if (!panel.renderAssetId) return;
+        entries.set(panel.id, {
+          panel,
+          pageId: candidate.id,
+          pageLabel: candidate.label || `Page ${indexFallback + 1}`,
+          pageOrder: indexFallback,
+          panelOrder: panel.order ?? panelIndex,
+          updatedAt: panel.updatedAt ?? candidate.updatedAt ?? undefined,
+        });
+      });
+    };
+
+    allPages.forEach((candidate, index) => registerPage(candidate, index));
+
+    const parseTimestamp = (value?: string) => {
+      if (!value) return 0;
+      const timestamp = Date.parse(value);
+      return Number.isNaN(timestamp) ? 0 : timestamp;
+    };
+
+    return Array.from(entries.values()).sort((a, b) => {
+      const timeDelta = parseTimestamp(b.updatedAt) - parseTimestamp(a.updatedAt);
+      if (timeDelta !== 0) {
+        return timeDelta;
+      }
+      if (a.pageOrder !== b.pageOrder) {
+        return a.pageOrder - b.pageOrder;
+      }
+      return a.panelOrder - b.panelOrder;
+    });
+  }, [allPages]);
+
+  const handleProjectLibraryTargetChange = useCallback(
+    (panelId: UUID, updates: { pageId?: UUID | ""; panelId?: UUID | "" }) => {
+      setProjectLibraryTargets((previous) => {
+        const current = previous[panelId] ?? { pageId: "", panelId: "" };
+        const next = {
+          pageId: updates.pageId !== undefined ? updates.pageId : current.pageId,
+          panelId: updates.panelId !== undefined ? updates.panelId : current.panelId,
+        };
+        return {
+          ...previous,
+          [panelId]: next,
+        };
+      });
+    },
+    [],
+  );
+
   return (
     <div className="pane pane-storyboard">
       <div className="pane-header">
@@ -3189,6 +3306,13 @@ function PanelsTab({
             type="button"
             className={subTab === "library" ? "subtab is-active" : "subtab"}
             onClick={() => setSubTab("library")}
+          >
+            Panel Edit
+          </button>
+          <button
+            type="button"
+            className={subTab === "project-library" ? "subtab is-active" : "subtab"}
+            onClick={() => setSubTab("project-library")}
           >
             Library
           </button>
@@ -3788,16 +3912,26 @@ function PanelsTab({
                       />
                     </div>
                     <div className="field">
-                      <button
-                        type="button"
-                        className="primary"
-                        onClick={handleRenderSelectedPanel}
-                        disabled={
-                          !selectedPanel || status === "loading" || status === "saving" || status === "generating"
-                        }
-                      >
-                        {status === "generating" ? "Generating..." : "Generate Panel Image"}
-                      </button>
+                      <label>Generate panel image</label>
+                      <div className="panel-generation-buttons">
+                        <button
+                          type="button"
+                          className="primary"
+                          onClick={() => handleRenderSelectedPanel("nano-banana")}
+                          disabled={renderButtonDisabled}
+                        >
+                          {renderButtonLabel("nano-banana")}
+                        </button>
+                        <button
+                          type="button"
+                          className="primary"
+                          onClick={() => handleRenderSelectedPanel("nano-banana-pro")}
+                          disabled={renderButtonDisabled}
+                        >
+                          {renderButtonLabel("nano-banana-pro")}
+                        </button>
+                      </div>
+                      <p className="helper-text">Nano Banana is the default; Nano Banana Pro leans into fidelity.</p>
                     </div>
                     {selectedPanel.renderAssetId && (
                       <div className="field">
@@ -3887,6 +4021,131 @@ function PanelsTab({
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {subTab === "project-library" && (
+        <div className="project-library">
+          <div className="project-library-header">
+            <h3>Project Library</h3>
+            <p className="helper-text">
+              {projectLibraryPanels.length === 0
+                ? "No renders yet. Generate panel images to populate the library."
+                : `${projectLibraryPanels.length} render${projectLibraryPanels.length === 1 ? "" : "s"} available.`}
+            </p>
+          </div>
+          {projectLibraryPanels.length === 0 ? (
+            <div className="storyboard-empty">Create or render panels to see them here.</div>
+          ) : (
+            <div className="storyboard-library">
+              {projectLibraryPanels.map(({ panel, pageLabel, pageId }) => {
+                const storedTarget = projectLibraryTargets[panel.id];
+                let selectedPageId: UUID | "" = storedTarget?.pageId ?? pageId;
+                if (selectedPageId && !pageLookup.has(selectedPageId)) {
+                  selectedPageId = "";
+                }
+                const selectedPage = selectedPageId ? pageLookup.get(selectedPageId) ?? null : null;
+                const panelOptions = selectedPage?.panels ?? [];
+                let selectedPanelId: UUID | "" = storedTarget?.panelId ?? panel.id;
+                if (selectedPanelId && !panelOptions.some((candidate) => candidate.id === selectedPanelId)) {
+                  selectedPanelId = "";
+                }
+                const canUpload = Boolean(selectedPanelId);
+                const uploading = selectedPanelId ? panelLibraryUploading[selectedPanelId] : false;
+
+                return (
+                  <div key={panel.id} className="library-card">
+                    <div className="library-thumb">
+                      {panel.renderAssetId ? (
+                        <img src={assetHref(panel.renderAssetId)} alt={panel.label || "Panel render"} />
+                      ) : (
+                        <div className="library-thumb-empty">Render missing</div>
+                      )}
+                    </div>
+                    <div className="library-meta">
+                      <strong>{panel.label || "Untitled panel"}</strong>
+                      <span className="helper-text">
+                        {pageLabel}
+                        {typeof panel.order === "number" ? ` · Panel #${panel.order + 1}` : ""}
+                      </span>
+                    </div>
+                    <div className="library-target-selects">
+                      <label>
+                        Page
+                        <select
+                          value={selectedPageId}
+                          onChange={(event) => {
+                            const value = event.target.value as UUID | "";
+                            handleProjectLibraryTargetChange(panel.id, { pageId: value, panelId: "" });
+                          }}
+                        >
+                          <option value="">Select page...</option>
+                          {allPages.map((candidate) => (
+                            <option key={candidate.id} value={candidate.id}>
+                              {candidate.label || "Untitled page"}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Panel
+                        <select
+                          value={selectedPanelId}
+                          onChange={(event) =>
+                            handleProjectLibraryTargetChange(panel.id, {
+                              panelId: (event.target.value as UUID) || "",
+                            })
+                          }
+                          disabled={!selectedPageId}
+                        >
+                          <option value="">Select panel...</option>
+                          {panelOptions.map((candidate) => (
+                            <option key={candidate.id} value={candidate.id}>
+                              {candidate.label || `Panel ${candidate.order + 1}`}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <div className="library-actions">
+                      {panel.renderAssetId && (
+                        <a
+                          href={assetHref(panel.renderAssetId)}
+                          download={`${pageLabel.replace(/\s+/g, "-").toLowerCase()}-${panel.order ?? 0}.png`}
+                          className="ghost"
+                        >
+                          Download
+                        </a>
+                      )}
+                      <label
+                        className={canUpload ? "upload" : "upload is-disabled"}
+                        aria-disabled={!canUpload}
+                        title={canUpload ? undefined : "Select a destination panel to enable upload"}
+                      >
+                        Upload
+                        <input
+                          type="file"
+                          accept="image/*"
+                          style={{ display: "none" }}
+                          disabled={!canUpload || uploading}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            if (!file) return;
+                            if (!selectedPanelId) {
+                              setError("Choose a page and panel before uploading a replacement image.");
+                              event.target.value = "";
+                              return;
+                            }
+                            void handlePanelAssetUpload(selectedPanelId as UUID, file);
+                            event.target.value = "";
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

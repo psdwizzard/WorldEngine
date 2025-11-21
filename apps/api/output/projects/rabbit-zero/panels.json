@@ -157,15 +157,15 @@
           "id": "a8013384-4cd8-4bb6-846e-8a96fef79d4a",
           "pageId": "3cc7c265-a923-42be-a73e-322e3075fef6",
           "label": "Panel 1",
-          "renderAssetId": "38fb07d9-bf98-4621-a44e-8190988ae9dd",
+          "renderAssetId": "92f99e9f-f32d-45a4-9e85-7cad3fe8923f",
           "renderScale": 2.1435888100000016,
-          "renderOffsetX": 0,
-          "renderOffsetY": 0,
-          "prompt": "[rabbit-human-back] is in the [Bedroom-r].",
+          "renderOffsetX": 0.054431512981199644,
+          "renderOffsetY": -0.1606340819022457,
+          "prompt": " The man is in a white sleeveless shirt sitting on the edge of the bed farthest from the viewer looking out the window of the room Please keep the room and the man is consistent as possible , he just got up from sleep. he is on the side of the bed closes to the window, back is facing the viewer",
           "order": 0,
           "geometry": {
-            "x": 0.027109482368036494,
-            "y": 0.04184996677519327,
+            "x": 0.03626560654797069,
+            "y": 0.022405045307841456,
             "width": 0.4565995975855132,
             "height": 0.2,
             "cornerOffsets": {
@@ -176,7 +176,7 @@
             }
           },
           "createdAt": "2025-11-18T23:40:40.520Z",
-          "updatedAt": "2025-11-19T00:31:09.950Z"
+          "updatedAt": "2025-11-21T14:53:03.859Z"
         },
         {
           "id": "50d471c3-5e1e-4afa-9377-e80f2caf5a85",
@@ -205,7 +205,7 @@
             }
           },
           "createdAt": "2025-11-18T23:40:40.520Z",
-          "updatedAt": "2025-11-19T00:31:09.950Z"
+          "updatedAt": "2025-11-21T14:53:03.859Z"
         },
         {
           "id": "1392d2df-69bd-4402-8d38-5dff764ab94c",
@@ -238,13 +238,13 @@
             }
           },
           "createdAt": "2025-11-18T23:40:40.520Z",
-          "updatedAt": "2025-11-19T00:31:09.950Z"
+          "updatedAt": "2025-11-21T14:53:03.859Z"
         }
       ],
       "createdAt": "2025-11-18T23:40:40.520Z",
-      "updatedAt": "2025-11-19T00:31:09.950Z"
+      "updatedAt": "2025-11-21T14:53:03.859Z"
     }
   ],
-  "activePageId": "3cc7c265-a923-42be-a73e-322e3075fef6",
-  "updatedAt": "2025-11-19T00:31:09.950Z"
+  "activePageId": "583318dd-d52d-4e59-9944-abe1640461a3",
+  "updatedAt": "2025-11-21T15:10:08.298Z"
 }
