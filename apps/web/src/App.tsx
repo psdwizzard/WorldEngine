@@ -67,6 +67,13 @@ const MIN_PANEL_SIZE = 0.12;
 type ResizeCorner = "nw" | "ne" | "sw" | "se";
 type InteractionMode = "move" | "resize" | "image-pan";
 
+const generateId = () => {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).slice(2);
+};
+
 type InteractionState = {
   panelId: UUID;
   mode: InteractionMode;
@@ -2484,6 +2491,57 @@ function PanelsTab({
     });
   }, [selectedPanel, updatePanel]);
 
+  const duplicateSelectedPanel = useCallback(() => {
+    if (!selectedPanel) return;
+    const newId = generateId();
+    const timestamp = new Date().toISOString();
+    let duplicated = false;
+
+    setPage((previous) => {
+      if (!previous) return previous;
+      const panelIndex = previous.panels.findIndex((panel) => panel.id === selectedPanel.id);
+      if (panelIndex === -1) return previous;
+      const base = previous.panels[panelIndex];
+
+      const geometry = {
+        ...base.geometry,
+        x: clampFraction(base.geometry.x + 0.02, 0, 1 - base.geometry.width),
+        y: clampFraction(base.geometry.y + 0.02, 0, 1 - base.geometry.height),
+      };
+
+      const duplicate: StoryboardPanel = {
+        ...base,
+        id: newId as UUID,
+        pageId: previous.id,
+        label: base.label ? `${base.label} copy` : `Panel ${base.order + 2}`,
+        order: base.order + 1,
+        geometry,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+
+      const panels = [...previous.panels];
+      panels.splice(panelIndex + 1, 0, duplicate);
+      const reindexed = panels.map((panel, order) => ({
+        ...panel,
+        order,
+        updatedAt: timestamp,
+      }));
+
+      duplicated = true;
+      return {
+        ...previous,
+        panels: reindexed,
+        updatedAt: timestamp,
+      };
+    });
+
+    if (duplicated) {
+      setSelectedPanelId(newId as UUID);
+      markDirty();
+    }
+  }, [markDirty, selectedPanel]);
+
   const movePanelLayer = useCallback(
     (panelId: UUID, direction: "up" | "down") => {
       setPage((previous) => {
@@ -2864,15 +2922,13 @@ function PanelsTab({
         const scale = (panel.renderScale ?? 1) * containScale;
         const offsetX = panel.renderOffsetX ?? 0;
         const offsetY = panel.renderOffsetY ?? 0;
+        const rotationRadians = ((panel.rotation ?? 0) * Math.PI) / 180;
 
         const drawW = img.width * scale;
         const drawH = img.height * scale;
 
         const centerX = panelX + panelW / 2;
         const centerY = panelY + panelH / 2;
-
-        const drawX = centerX - drawW / 2 + offsetX * panelW;
-        const drawY = centerY - drawH / 2 + offsetY * panelH;
 
         const offsets = panel.geometry.cornerOffsets;
 
@@ -2913,7 +2969,11 @@ function PanelsTab({
         }
 
         ctx.clip();
-        ctx.drawImage(img, drawX, drawY, drawW, drawH);
+        ctx.translate(centerX + offsetX * panelW, centerY + offsetY * panelH);
+        if (rotationRadians !== 0) {
+          ctx.rotate(rotationRadians);
+        }
+        ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
         ctx.restore();
 
         if (panel.strokeWidth && panel.strokeWidth > 0) {
@@ -3073,6 +3133,16 @@ function PanelsTab({
     (event: ChangeEvent<HTMLInputElement>) => {
       if (!selectedPanel) return;
       updatePanel(selectedPanel.id, { strokeColor: event.target.value });
+    },
+    [selectedPanel, updatePanel],
+  );
+
+  const handleRotationChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      if (!selectedPanel) return;
+      const parsed = parseFloat(event.target.value);
+      const clamped = Number.isFinite(parsed) ? Math.min(180, Math.max(-180, parsed)) : 0;
+      updatePanel(selectedPanel.id, { rotation: clamped });
     },
     [selectedPanel, updatePanel],
   );
@@ -3435,7 +3505,7 @@ function PanelsTab({
                       alt={panel.label || "Panel render"}
                       className="storyboard-panel-image"
                       style={{
-                        transform: `translate(${(panel.renderOffsetX ?? 0) * 100}%, ${(panel.renderOffsetY ?? 0) * 100}%) scale(${panel.renderScale ?? 1})`,
+                        transform: `translate(${(panel.renderOffsetX ?? 0) * 100}%, ${(panel.renderOffsetY ?? 0) * 100}%) scale(${panel.renderScale ?? 1}) rotate(${panel.rotation ?? 0}deg)`,
                         transformOrigin: "50% 50%",
                         pointerEvents: editingPanelId === panel.id ? "auto" : "none",
                         cursor: editingPanelId === panel.id ? "grab" : "default",
@@ -3864,6 +3934,21 @@ function PanelsTab({
                           onChange={handleStrokeColorChange}
                         />
                       </div>
+                      <div className="field">
+                        <label htmlFor="panel-rotation">Rotation</label>
+                        <input
+                          id="panel-rotation"
+                          type="range"
+                          min="-180"
+                          max="180"
+                          step="1"
+                          value={selectedPanel.rotation ?? 0}
+                          onChange={handleRotationChange}
+                          aria-valuemin={-180}
+                          aria-valuemax={180}
+                          aria-valuenow={selectedPanel.rotation ?? 0}
+                        />
+                      </div>
                     </div>
                     <div className="field">
                       <label htmlFor="panel-label">Panel label</label>
@@ -3946,6 +4031,15 @@ function PanelsTab({
                       </div>
                     )}
                     <div className="panel-actions">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={duplicateSelectedPanel}
+                        disabled={!page || !selectedPanel || status === "saving" || status === "generating"}
+                        title="Duplicate this panel"
+                      >
+                        Duplicate Panel
+                      </button>
                       <button
                         type="button"
                         className="ghost"

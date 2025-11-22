@@ -24,5 +24,13 @@
         }
       }
     }
+  },
+  {
+    "id": "efdd463b-9205-4316-b14c-06f7812fe9d7",
+    "name": "rabbit-zero",
+    "slug": "rabbit-zero-2",
+    "issueLabel": "0",
+    "createdAt": "2025-11-22T00:32:01.500Z",
+    "updatedAt": "2025-11-22T00:32:01.500Z"
   }
 ]
