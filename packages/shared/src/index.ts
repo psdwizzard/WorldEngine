@@ -88,6 +88,10 @@ export interface PanelPrompt {
   renderOffsetY?: number;
   /** Optional rotation applied to the rendered image, in degrees. */
   rotation?: number;
+  /** Optional drop shadow blur radius in pixels. */
+  shadowBlur?: number;
+  /** Optional drop shadow color (CSS string). */
+  shadowColor?: string;
   /** Optional border width in pixels. */
   strokeWidth?: number;
   /** Optional border color (CSS string). */

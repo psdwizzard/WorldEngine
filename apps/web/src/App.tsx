@@ -2931,56 +2931,13 @@ function PanelsTab({
         const centerY = panelY + panelH / 2;
 
         const offsets = panel.geometry.cornerOffsets;
+        const shadowBlur = panel.shadowBlur ?? 0;
+        const shadowColor = panel.shadowColor ?? "rgba(0,0,0,0.35)";
 
-        ctx.save();
-        ctx.beginPath();
-
-        if (offsets) {
-          // Offsets are stored as fractions of the panel's own width/height.
-          const off = (c: { x: number; y: number } | undefined) => ({
-            x: (c?.x ?? 0) * panelW,
-            y: (c?.y ?? 0) * panelH,
-          });
-
-          const tl = {
-            x: panelX + off(offsets.topLeft).x,
-            y: panelY + off(offsets.topLeft).y,
-          };
-          const tr = {
-            x: panelX + panelW + off(offsets.topRight).x,
-            y: panelY + off(offsets.topRight).y,
-          };
-          const br = {
-            x: panelX + panelW + off(offsets.bottomRight).x,
-            y: panelY + panelH + off(offsets.bottomRight).y,
-          };
-          const bl = {
-            x: panelX + off(offsets.bottomLeft).x,
-            y: panelY + panelH + off(offsets.bottomLeft).y,
-          };
-
-          ctx.moveTo(tl.x, tl.y);
-          ctx.lineTo(tr.x, tr.y);
-          ctx.lineTo(br.x, br.y);
-          ctx.lineTo(bl.x, bl.y);
-          ctx.closePath();
-        } else {
-          ctx.rect(panelX, panelY, panelW, panelH);
-        }
-
-        ctx.clip();
-        ctx.translate(centerX + offsetX * panelW, centerY + offsetY * panelH);
-        if (rotationRadians !== 0) {
-          ctx.rotate(rotationRadians);
-        }
-        ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
-        ctx.restore();
-
-        if (panel.strokeWidth && panel.strokeWidth > 0) {
-          ctx.save();
+        const buildPath = () => {
           ctx.beginPath();
-          
           if (offsets) {
+            // Offsets are stored as fractions of the panel's own width/height.
             const off = (c: { x: number; y: number } | undefined) => ({
               x: (c?.x ?? 0) * panelW,
               y: (c?.y ?? 0) * panelH,
@@ -3011,7 +2968,34 @@ function PanelsTab({
           } else {
             ctx.rect(panelX, panelY, panelW, panelH);
           }
+        };
 
+        ctx.save();
+        buildPath();
+
+        if (shadowBlur > 0) {
+          ctx.save();
+          ctx.shadowColor = shadowColor;
+          ctx.shadowBlur = shadowBlur;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+          ctx.fillStyle = shadowColor;
+          ctx.fill();
+          ctx.restore();
+          buildPath();
+        }
+
+        ctx.clip();
+        ctx.translate(centerX + offsetX * panelW, centerY + offsetY * panelH);
+        if (rotationRadians !== 0) {
+          ctx.rotate(rotationRadians);
+        }
+        ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+        ctx.restore();
+
+        if (panel.strokeWidth && panel.strokeWidth > 0) {
+          ctx.save();
+          buildPath();
           ctx.lineWidth = panel.strokeWidth;
           ctx.strokeStyle = panel.strokeColor ?? "#000000";
           ctx.stroke();
@@ -3137,6 +3121,24 @@ function PanelsTab({
     [selectedPanel, updatePanel],
   );
 
+  const handleShadowBlurChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      if (!selectedPanel) return;
+      const value = parseFloat(event.target.value);
+      const clamped = Number.isFinite(value) ? clampFraction(value, 0, 200) : 0;
+      updatePanel(selectedPanel.id, { shadowBlur: clamped });
+    },
+    [selectedPanel, updatePanel],
+  );
+
+  const handleShadowColorChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      if (!selectedPanel) return;
+      updatePanel(selectedPanel.id, { shadowColor: event.target.value });
+    },
+    [selectedPanel, updatePanel],
+  );
+
   const handleRotationChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
       if (!selectedPanel) return;
@@ -3257,6 +3259,9 @@ function PanelsTab({
       height: `${panel.geometry.height * 100}%`,
     };
 
+    const shadowBlur = panel.shadowBlur ?? 0;
+    const shadowColor = panel.shadowColor ?? "rgba(0, 0, 0, 0.35)";
+
     const offsets = panel.geometry.cornerOffsets;
     if (offsets) {
       // Compute polygon points in % relative to the bounding box
@@ -3277,6 +3282,10 @@ function PanelsTab({
        style.borderWidth = panel.strokeWidth ? `${panel.strokeWidth}px` : undefined;
        style.borderColor = panel.strokeColor;
        style.borderStyle = panel.strokeWidth ? "solid" : undefined;
+    }
+
+    if (shadowBlur > 0) {
+      style.filter = `drop-shadow(0 0 ${shadowBlur}px ${shadowColor})`;
     }
 
     return style;
@@ -3932,6 +3941,27 @@ function PanelsTab({
                           type="color"
                           value={selectedPanel.strokeColor ?? "#000000"}
                           onChange={handleStrokeColorChange}
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor="panel-shadow-blur">Drop shadow</label>
+                        <input
+                          id="panel-shadow-blur"
+                          type="range"
+                          min="0"
+                          max="60"
+                          step="1"
+                          value={selectedPanel.shadowBlur ?? 0}
+                          onChange={handleShadowBlurChange}
+                          aria-valuemin={0}
+                          aria-valuemax={60}
+                          aria-valuenow={selectedPanel.shadowBlur ?? 0}
+                        />
+                        <input
+                          type="color"
+                          value={selectedPanel.shadowColor ?? "#000000"}
+                          onChange={handleShadowColorChange}
+                          aria-label="Shadow color"
                         />
                       </div>
                       <div className="field">

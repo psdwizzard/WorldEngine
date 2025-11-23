@@ -52,6 +52,8 @@ const storyboardPanelSchema = z.object({
   renderOffsetX: z.number().finite().optional(),
   renderOffsetY: z.number().finite().optional(),
   rotation: z.number().finite().min(-180).max(180).optional(),
+  shadowBlur: z.number().finite().min(0).max(200).optional(),
+  shadowColor: z.string().optional(),
   strokeWidth: z.number().finite().min(0).optional(),
   strokeColor: z.string().optional(),
   prompt: z.string(),
@@ -166,6 +168,8 @@ panelsRouter.post("/create", async (req, res) => {
     order: currentPage.panels.length,
     geometry: defaultGeometry,
     rotation: 0,
+    shadowBlur: 0,
+    shadowColor: "rgba(0,0,0,0.35)",
     createdAt: timestamp,
     updatedAt: timestamp,
   };

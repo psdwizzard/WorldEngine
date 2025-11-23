@@ -57,6 +57,8 @@ function createDefaultPage(): StoryboardPage {
       itemId: undefined,
       prompt: "",
       rotation: 0,
+      shadowBlur: 0,
+      shadowColor: "rgba(0,0,0,0.35)",
       notes: undefined,
       order: 0,
       geometry: { x: 0.05, y: 0.05, width: 0.4, height: 0.4 },
@@ -73,6 +75,8 @@ function createDefaultPage(): StoryboardPage {
       itemId: undefined,
       prompt: "",
       rotation: 0,
+      shadowBlur: 0,
+      shadowColor: "rgba(0,0,0,0.35)",
       notes: undefined,
       order: 1,
       geometry: { x: 0.55, y: 0.05, width: 0.4, height: 0.4 },
@@ -89,6 +93,8 @@ function createDefaultPage(): StoryboardPage {
       itemId: undefined,
       prompt: "",
       rotation: 0,
+      shadowBlur: 0,
+      shadowColor: "rgba(0,0,0,0.35)",
       notes: undefined,
       order: 2,
       geometry: { x: 0.05, y: 0.5, width: 0.9, height: 0.4 },
@@ -197,6 +203,8 @@ function mergePanel(existing: StoryboardPanel | undefined, incoming: StoryboardP
   const renderOffsetX = incoming.renderOffsetX ?? existing?.renderOffsetX ?? 0;
   const renderOffsetY = incoming.renderOffsetY ?? existing?.renderOffsetY ?? 0;
   const rotation = clamp(incoming.rotation ?? existing?.rotation ?? 0, -180, 180);
+  const shadowBlur = clamp(incoming.shadowBlur ?? existing?.shadowBlur ?? 0, 0, 200);
+  const shadowColor = incoming.shadowColor ?? existing?.shadowColor;
   const strokeWidth = incoming.strokeWidth ?? existing?.strokeWidth;
   const strokeColor = incoming.strokeColor ?? existing?.strokeColor;
 
@@ -212,6 +220,8 @@ function mergePanel(existing: StoryboardPanel | undefined, incoming: StoryboardP
     renderOffsetX,
     renderOffsetY,
     rotation,
+    shadowBlur,
+    shadowColor,
     strokeWidth,
     strokeColor,
     prompt,

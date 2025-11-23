@@ -5,6 +5,8 @@ dist/
 .env.*
 !.env.example
 !*/.env.example
+apps/api/.env.local
+apps/web/.env.local
 *.log
 pnpm-lock.yaml
 npm-debug.log*
@@ -13,3 +15,5 @@ yarn-error.log*
 .DS_Store
 *.local
 coverage/tmp/
+apps/api/output/**
+!apps/api/output/.gitkeep
