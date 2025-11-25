@@ -10,6 +10,7 @@ import {
   createStoryboardPage,
   setActiveStoryboardPage,
   deleteStoryboardPage,
+  findPanelById,
 } from "../stores/panels";
 import { resolveProjectSlug } from "../lib/projectScope";
 import { getAsset, getAssetBuffer, saveAsset, saveAssetBuffer } from "../services/assetStore";
@@ -70,6 +71,7 @@ const storyboardPageSchema = z.object({
   width: z.number().finite().positive(),
   height: z.number().finite().positive(),
   backgroundColor: z.string().optional(),
+  issueLabel: z.string().optional(),
   panels: z.array(storyboardPanelSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -191,12 +193,15 @@ panelsRouter.delete("/:panelId", async (req, res) => {
   }
 
   const projectSlug = resolveProjectSlug(req);
-  const currentPage = getActivePage(projectSlug);
-  const panelIndex = currentPage.panels.findIndex(p => p.id === parsed.data.panelId);
   
-  if (panelIndex === -1) {
+  // Search ALL pages for the panel, not just the active page
+  const found = findPanelById(projectSlug, parsed.data.panelId as UUID);
+  if (!found) {
     return res.status(404).json({ error: "panel_not_found" });
   }
+  
+  const { page: currentPage } = found;
+  const panelIndex = currentPage.panels.findIndex(p => p.id === parsed.data.panelId);
 
   // Don't allow deleting the last panel
   if (currentPage.panels.length <= 1) {
@@ -233,11 +238,14 @@ panelsRouter.post("/:panelId/asset", upload.single("image"), async (req, res) =>
   }
 
   const projectSlug = resolveProjectSlug(req);
-  const page = getActivePage(projectSlug);
-  const panel = page.panels.find((candidate) => candidate.id === parsed.data.panelId);
-  if (!panel) {
+  
+  // Search ALL pages for the panel, not just the active page
+  const found = findPanelById(projectSlug, parsed.data.panelId as UUID);
+  if (!found) {
     return res.status(404).json({ error: "panel_not_found" });
   }
+  
+  const { page, panel } = found;
 
   try {
     const asset = await saveAsset(file, ["panels", page.id, panel.id, "upload"], projectSlug);
@@ -271,11 +279,14 @@ panelsRouter.post("/render", async (req, res) => {
   }
 
   const projectSlug = resolveProjectSlug(req);
-  const page = getActivePage(projectSlug);
-  const panel = page.panels.find((candidate) => candidate.id === (parsed.data.panelId as UUID));
-  if (!panel) {
+  
+  // Search ALL pages for the panel, not just the active page
+  const found = findPanelById(projectSlug, parsed.data.panelId as UUID);
+  if (!found) {
     return res.status(404).json({ error: "panel_not_found" });
   }
+  
+  const { page, panel } = found;
 
   try {
     const { generateImage, DEFAULT_IMAGE_MODEL } = await import("../lib/gemini");
@@ -411,9 +422,16 @@ panelsRouter.post("/render", async (req, res) => {
       projectSlug,
     });
 
+    // Preserve the old render in replacedAssetIds history (if there was one)
+    const replacedAssetIds = [...(panel.replacedAssetIds ?? [])];
+    if (panel.renderAssetId) {
+      replacedAssetIds.push(panel.renderAssetId);
+    }
+
     const updatedPanel: StoryboardPanel = {
       ...panel,
       renderAssetId: asset.id,
+      replacedAssetIds: replacedAssetIds.length > 0 ? replacedAssetIds : undefined,
       updatedAt: new Date().toISOString(),
     };
 
@@ -458,13 +476,20 @@ panelsRouter.put("/layout", async (req, res) => {
 
 panelsRouter.get("/pages", (req, res) => {
   const projectSlug = resolveProjectSlug(req);
-  const pages = listStoryboardPages(projectSlug);
+  const issueLabel = typeof req.query.issueLabel === "string" ? req.query.issueLabel : undefined;
+  const pages = listStoryboardPages(projectSlug, issueLabel);
   res.json({ pages });
 });
 
+const createPageSchema = z.object({
+  issueLabel: z.string().optional(),
+});
+
 panelsRouter.post("/pages", async (req, res) => {
+  const parsed = createPageSchema.safeParse(req.body);
   const projectSlug = resolveProjectSlug(req);
-  const page = await createStoryboardPage(projectSlug);
+  const issueLabel = parsed.success ? parsed.data.issueLabel : undefined;
+  const page = await createStoryboardPage(projectSlug, issueLabel);
   res.status(201).json({ page });
 });
 
@@ -497,4 +522,39 @@ panelsRouter.delete("/pages/:pageId", async (req, res) => {
   }
 
   res.json({ page: activePage });
+});
+
+const updatePageIssueSchema = z.object({
+  issueLabel: z.string().optional().nullable(),
+});
+
+// Update a page's issue label (for assigning orphaned pages or moving pages between issues)
+panelsRouter.patch("/pages/:pageId/issue", async (req, res) => {
+  const paramsParsed = pageIdParamSchema.safeParse({ pageId: req.params.pageId });
+  if (!paramsParsed.success) {
+    return res.status(400).json({ error: "invalid_page_id", issues: paramsParsed.error.flatten() });
+  }
+
+  const bodyParsed = updatePageIssueSchema.safeParse(req.body);
+  if (!bodyParsed.success) {
+    return res.status(400).json({ error: "invalid_body", issues: bodyParsed.error.flatten() });
+  }
+
+  const projectSlug = resolveProjectSlug(req);
+  const pages = listStoryboardPages(projectSlug);
+  const page = pages.find((p) => p.id === paramsParsed.data.pageId);
+  
+  if (!page) {
+    return res.status(404).json({ error: "page_not_found" });
+  }
+
+  // Update the page's issueLabel
+  const updatedPage: StoryboardPage = {
+    ...page,
+    issueLabel: bodyParsed.data.issueLabel ?? undefined,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const savedPage = await saveStoryboardPage(projectSlug, updatedPage);
+  res.json({ page: savedPage });
 });

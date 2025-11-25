@@ -190,6 +190,21 @@ export function getActivePage(projectSlug: string): StoryboardPage {
   return fallback;
 }
 
+/**
+ * Find a panel by ID across ALL pages in the project.
+ * Returns both the panel and the page it belongs to.
+ */
+export function findPanelById(projectSlug: string, panelId: UUID): { page: StoryboardPage; panel: StoryboardPanel } | null {
+  const document = ensureDocument(projectSlug);
+  for (const page of document.pages) {
+    const panel = page.panels.find((p) => p.id === panelId);
+    if (panel) {
+      return { page, panel };
+    }
+  }
+  return null;
+}
+
 function mergePanel(existing: StoryboardPanel | undefined, incoming: StoryboardPanel, index: number, pageId: UUID) {
   const timestamp = now();
   const createdAt = existing?.createdAt ?? incoming.createdAt ?? timestamp;
@@ -251,6 +266,7 @@ export async function saveStoryboardPage(projectSlug: string, page: StoryboardPa
     width: Number.isFinite(page.width) && page.width > 0 ? page.width : existingPage?.width ?? 1988,
     height: Number.isFinite(page.height) && page.height > 0 ? page.height : existingPage?.height ?? 3075,
     backgroundColor: page.backgroundColor ?? existingPage?.backgroundColor,
+    issueLabel: page.issueLabel ?? existingPage?.issueLabel,
     panels,
     createdAt: existingPage?.createdAt ?? page.createdAt ?? now(),
     updatedAt: now(),
@@ -270,16 +286,23 @@ export async function saveStoryboardPage(projectSlug: string, page: StoryboardPa
   return updatedPage;
 }
 
-export function listStoryboardPages(projectSlug: string): StoryboardPage[] {
+export function listStoryboardPages(projectSlug: string, issueLabel?: string): StoryboardPage[] {
   const document = ensureDocument(projectSlug);
+  if (issueLabel) {
+    return document.pages.filter((page) => page.issueLabel === issueLabel);
+  }
   return document.pages;
 }
 
-export async function createStoryboardPage(projectSlug: string) {
+export async function createStoryboardPage(projectSlug: string, issueLabel?: string) {
   const slug = normalizeProjectSlug(projectSlug ?? DEFAULT_PROJECT_SLUG);
   const document = ensureDocument(slug);
 
-  const nextIndex = document.pages.length;
+  // Count pages in this issue for labeling
+  const issuePages = issueLabel
+    ? document.pages.filter((p) => p.issueLabel === issueLabel)
+    : document.pages;
+  const nextIndex = issuePages.length;
   const base = createDefaultPage();
   const label = `Page ${nextIndex + 1}`;
   const createdAt = now();
@@ -296,6 +319,7 @@ export async function createStoryboardPage(projectSlug: string) {
     ...base,
     label,
     panels,
+    issueLabel,
     createdAt,
     updatedAt: createdAt,
   };

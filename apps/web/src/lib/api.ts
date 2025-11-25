@@ -491,8 +491,13 @@ export async function saveStoryboardLayout(
 export async function listStoryboardPages(input?: {
   geminiKey?: string;
   projectSlug?: string;
+  issueLabel?: string;
 }): Promise<StoryboardPage[]> {
-  const response = await fetch(resolveUrl("/panels/pages"), {
+  const url = new URL(resolveUrl("/panels/pages"));
+  if (input?.issueLabel) {
+    url.searchParams.set("issueLabel", input.issueLabel);
+  }
+  const response = await fetch(url.toString(), {
     headers: {
       Accept: "application/json",
       ...authHeader({ geminiKey: input?.geminiKey, projectSlug: input?.projectSlug }),
@@ -511,12 +516,15 @@ export async function listStoryboardPages(input?: {
 export async function createStoryboardPageApi(input?: {
   geminiKey?: string;
   projectSlug?: string;
+  issueLabel?: string;
 }): Promise<StoryboardPage> {
   const response = await fetch(resolveUrl("/panels/pages"), {
     method: "POST",
     headers: {
+      "Content-Type": "application/json",
       ...authHeader({ geminiKey: input?.geminiKey, projectSlug: input?.projectSlug }),
     },
+    body: JSON.stringify({ issueLabel: input?.issueLabel }),
   });
 
   if (!response.ok) {
@@ -562,6 +570,29 @@ export async function deleteStoryboardPageApi(
   if (!response.ok) {
     const message = await response.text();
     throw new Error(message || "Failed to delete storyboard page");
+  }
+
+  const payload = (await response.json()) as { page: StoryboardPage };
+  return payload.page;
+}
+
+export async function updatePageIssue(
+  pageId: UUID,
+  issueLabel: string | null,
+  input?: { geminiKey?: string; projectSlug?: string },
+): Promise<StoryboardPage> {
+  const response = await fetch(resolveUrl(`/panels/pages/${pageId}/issue`), {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeader({ geminiKey: input?.geminiKey, projectSlug: input?.projectSlug }),
+    },
+    body: JSON.stringify({ issueLabel }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to update page issue");
   }
 
   const payload = (await response.json()) as { page: StoryboardPage };

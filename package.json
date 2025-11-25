@@ -23,7 +23,8 @@
                     "lint":  "npm --workspaces run lint",
                     "test":  "npm --workspaces run test",
                     "typecheck":  "npm --workspaces run typecheck",
-                    "format":  "npm --workspaces run format"
+                    "format":  "npm --workspaces run format",
+                    "prepare":  "git config core.hooksPath .githooks"
                 },
     "devDependencies":  {
                             "concurrently":  "^9.1.2"

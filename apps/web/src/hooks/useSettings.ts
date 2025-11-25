@@ -7,6 +7,9 @@ export type WorkspaceSettings = {
   projectId?: string;
   projectSlug?: string;
   defaultPageBackgroundColor?: string;
+  selectedIssue?: string;
+  /** Custom issues created by the user (persisted across sessions) */
+  customIssues?: string[];
 };
 
 type SettingsStatus = "idle" | "dirty" | "saving" | "saved";

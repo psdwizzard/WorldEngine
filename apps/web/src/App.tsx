@@ -45,6 +45,7 @@ import {
   createStoryboardPageApi,
   activateStoryboardPage,
   deleteStoryboardPageApi,
+  updatePageIssue,
 } from "./lib/api";
 import "./App.css";
 
@@ -170,14 +171,14 @@ type UploadState = {
 
   const TABS: TabDescriptor[] = [
   {
+    key: "project-assets",
+    label: "Project Assets",
+    description: "Browse characters, locations, items, and pages for the active project.",
+  },
+  {
     key: "characters",
     label: "Characters",
     description: "Organize front views and custom slots for each character.",
-  },
-  {
-    key: "project-assets",
-    label: "Project Assets",
-    description: "Browse characters, locations, items, and storyboard pages for the active project.",
   },
   {
     key: "locations",
@@ -241,6 +242,15 @@ export function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectsStatus, setProjectsStatus] = useState<"loading" | "ready" | "error">("loading");
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [headerNewProjectName, setHeaderNewProjectName] = useState("");
+  const [headerNewProjectIssue, setHeaderNewProjectIssue] = useState("");
+  const [headerProjectCreating, setHeaderProjectCreating] = useState(false);
+  const [showNewIssueModal, setShowNewIssueModal] = useState(false);
+  const [newIssueName, setNewIssueName] = useState("");
+  const [storyboardIssues, setStoryboardIssues] = useState<string[]>([]);
+  const customIssues = settings.customIssues ?? [];
+  const selectedIssue = settings.selectedIssue ?? "";
 
   const refreshProjects = useCallback(async () => {
     setProjectsStatus("loading");
@@ -299,6 +309,24 @@ export function App() {
     [updateSetting],
   );
 
+  const handleHeaderCreateProject = useCallback(async () => {
+    if (!headerNewProjectName.trim()) return;
+    setHeaderProjectCreating(true);
+    try {
+      await handleProjectCreated({
+        name: headerNewProjectName.trim(),
+        issueLabel: headerNewProjectIssue.trim() || undefined,
+      });
+      setHeaderNewProjectName("");
+      setHeaderNewProjectIssue("");
+      setShowNewProjectModal(false);
+    } catch {
+      // Keep modal open on error so user can retry
+    } finally {
+      setHeaderProjectCreating(false);
+    }
+  }, [headerNewProjectName, headerNewProjectIssue, handleProjectCreated]);
+
   const handleSavePromptPresets = useCallback(
     async (projectId: UUID, promptPresets: PromptPresetSet) => {
       const project = await updateProject(projectId, { promptPresets });
@@ -310,12 +338,62 @@ export function App() {
     },
     [settings.projectId, updateSetting],
   );
-  const [activeTab, setActiveTab] = useState<TabKey>("characters");
+  const [activeTab, setActiveTab] = useState<TabKey>("project-assets");
 
   const activeDescriptor = useMemo(
     () => TABS.find((tab) => tab.key === activeTab) ?? TABS[0],
     [activeTab],
   );
+
+  // Fetch all storyboard pages to extract unique issues
+  const refreshStoryboardIssues = useCallback(async () => {
+    if (!settings.projectSlug) return;
+    try {
+      // Fetch ALL pages (no issue filter) to get the list of issues
+      const allPages = await listStoryboardPages({
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+      const issues = allPages
+        .map((p) => p.issueLabel)
+        .filter((label): label is string => Boolean(label && label.trim()));
+      setStoryboardIssues([...new Set(issues)]);
+    } catch (cause) {
+      console.error("issues:load_failed", cause);
+    }
+  }, [settings.geminiKey, settings.projectSlug]);
+
+  useEffect(() => {
+    void refreshStoryboardIssues();
+  }, [refreshStoryboardIssues]);
+
+  // Combine issues from storyboard pages + custom issues created by user
+  const uniqueIssues = useMemo(() => {
+    const allIssues = [...storyboardIssues, ...customIssues];
+    return [...new Set(allIssues)].sort();
+  }, [storyboardIssues, customIssues]);
+
+  // Handle issue dropdown change - show modal if "new" selected
+  const handleIssueChange = useCallback((value: string) => {
+    if (value === "__new__") {
+      setShowNewIssueModal(true);
+    } else {
+      updateSetting("selectedIssue", value || undefined);
+    }
+  }, [updateSetting]);
+
+  // Handle creating a new issue
+  const handleCreateIssue = useCallback(() => {
+    if (!newIssueName.trim()) return;
+    const trimmed = newIssueName.trim();
+    if (!customIssues.includes(trimmed) && !uniqueIssues.includes(trimmed)) {
+      // Persist custom issues to settings
+      updateSetting("customIssues", [...customIssues, trimmed]);
+    }
+    updateSetting("selectedIssue", trimmed);
+    setNewIssueName("");
+    setShowNewIssueModal(false);
+  }, [newIssueName, customIssues, uniqueIssues, updateSetting]);
 
   return (
     <div className="app-shell">
@@ -325,23 +403,146 @@ export function App() {
           <span className="brand-subtitle">Gemini 2.5 Flash comic pre-production toolkit</span>
         </div>
         <div className="app-header-controls">
-          <div className="field header-project-picker">
-            <label htmlFor="header-project-picker">Project</label>
-            <select
-              id="header-project-picker"
-              value={settings.projectId ?? ""}
-              onChange={(event) => handleProjectSelect(event.target.value)}
-              disabled={projectsStatus === "loading" || projects.length === 0}
-            >
-              <option value="">-- Select project --</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <select
+            className="header-select"
+            value={settings.projectId ?? ""}
+            onChange={(event) => handleProjectSelect(event.target.value)}
+            disabled={projectsStatus === "loading" || projects.length === 0}
+            title="Select project"
+          >
+            <option value="">Select project...</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className="header-select"
+            value={selectedIssue}
+            onChange={(e) => handleIssueChange(e.target.value)}
+            title="Select issue"
+          >
+            <option value="">All issues</option>
+            <option value="__new__">+ New Issue...</option>
+            {uniqueIssues.map((issue) => (
+              <option key={issue} value={issue}>
+                {issue}
+              </option>
+            ))}
+          </select>
+          <div className="header-divider" />
+          <button
+            type="button"
+            className="header-btn"
+            onClick={() => {
+              // Pre-fill issue if one is selected
+              if (selectedIssue && selectedIssue !== "__new__") {
+                setHeaderNewProjectIssue(selectedIssue);
+              }
+              setShowNewProjectModal(true);
+            }}
+            title="Create new project"
+          >
+            <span className="header-btn-icon">+</span>
+            New
+          </button>
         </div>
+        {showNewProjectModal && (
+          <div className="modal-overlay" onClick={() => setShowNewProjectModal(false)}>
+            <div className="modal-content new-project-modal" onClick={(e) => e.stopPropagation()}>
+              <h3>Create New Project</h3>
+              <div className="field">
+                <label htmlFor="header-new-project-name">Project name</label>
+                <input
+                  id="header-new-project-name"
+                  type="text"
+                  placeholder="My Awesome Project"
+                  value={headerNewProjectName}
+                  onChange={(e) => setHeaderNewProjectName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="header-new-project-issue">Issue (optional)</label>
+                <input
+                  id="header-new-project-issue"
+                  type="text"
+                  list="issue-suggestions"
+                  placeholder="Select or type an issue..."
+                  value={headerNewProjectIssue}
+                  onChange={(e) => setHeaderNewProjectIssue(e.target.value)}
+                />
+                <datalist id="issue-suggestions">
+                  {uniqueIssues.map((issue) => (
+                    <option key={issue} value={issue} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setShowNewProjectModal(false)}
+                  disabled={headerProjectCreating}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={handleHeaderCreateProject}
+                  disabled={headerProjectCreating || !headerNewProjectName.trim()}
+                >
+                  {headerProjectCreating ? "Creating..." : "Create"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {showNewIssueModal && (
+          <div className="modal-overlay" onClick={() => setShowNewIssueModal(false)}>
+            <div className="modal-content new-issue-modal" onClick={(e) => e.stopPropagation()}>
+              <h3>New Issue</h3>
+              <div className="field">
+                <label htmlFor="new-issue-name">Issue name</label>
+                <input
+                  id="new-issue-name"
+                  type="text"
+                  placeholder="Issue 4"
+                  value={newIssueName}
+                  onChange={(e) => setNewIssueName(e.target.value)}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newIssueName.trim()) {
+                      handleCreateIssue();
+                    }
+                  }}
+                />
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    setShowNewIssueModal(false);
+                    setNewIssueName("");
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={handleCreateIssue}
+                  disabled={!newIssueName.trim()}
+                >
+                  Add Issue
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="app-main">
@@ -370,7 +571,9 @@ export function App() {
             <LocationsTab settingsController={settingsController} />
           )}
           {activeDescriptor.key === "items" && <ItemsTab settingsController={settingsController} />}
-          {activeDescriptor.key === "panels" && <PanelsTab settingsController={settingsController} />}
+          {activeDescriptor.key === "panels" && (
+            <PanelsTab settingsController={settingsController} onRefreshIssues={refreshStoryboardIssues} />
+          )}
           {activeDescriptor.key === "settings" && (
             <SettingsTab
               settingsController={settingsController}
@@ -1130,6 +1333,15 @@ function ProjectAssetsTab({
   const [renamingId, setRenamingId] = useState<UUID | null>(null);
   const [renamingAngle, setRenamingAngle] = useState<CharacterAngle | null>(null);
 
+  // Pages state
+  const [pages, setPages] = useState<StoryboardPage[]>([]);
+  const [allPages, setAllPages] = useState<StoryboardPage[]>([]);
+  const [pagesStatus, setPagesStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [issueList, setIssueList] = useState<string[]>([]);
+  const [orphanedCount, setOrphanedCount] = useState(0);
+  const [selectedIssue, setSelectedIssue] = useState<string>("");
+  const [updatingPageId, setUpdatingPageId] = useState<UUID | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     setStatus("loading");
@@ -1168,7 +1380,105 @@ function ProjectAssetsTab({
     };
   }, [settings.geminiKey, settings.projectId, settings.projectSlug]);
 
+  // Load all issues for this project
+  const refreshIssueList = useCallback(async () => {
+    if (!settings.projectSlug) {
+      setIssueList([]);
+      setOrphanedCount(0);
+      return;
+    }
+
+    try {
+      const fetchedPages = await listStoryboardPages({
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+      setAllPages(fetchedPages);
+      
+      // Count orphaned pages (no issueLabel)
+      const orphaned = fetchedPages.filter((p) => !p.issueLabel || !p.issueLabel.trim());
+      setOrphanedCount(orphaned.length);
+      
+      // Get unique issue labels
+      const issues = fetchedPages
+        .map((p) => p.issueLabel)
+        .filter((label): label is string => Boolean(label && label.trim()));
+      const uniqueIssues = [...new Set(issues)].sort();
+      setIssueList(uniqueIssues);
+      
+      // Auto-select first issue if none selected (prefer an actual issue over unassigned)
+      if (!selectedIssue) {
+        if (uniqueIssues.length > 0) {
+          setSelectedIssue(uniqueIssues[0]);
+        } else if (orphaned.length > 0) {
+          setSelectedIssue("__unassigned__");
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load issues:", err);
+    }
+  }, [settings.geminiKey, settings.projectSlug, selectedIssue]);
+
+  useEffect(() => {
+    void refreshIssueList();
+  }, [refreshIssueList]);
+
+  // Load pages for the selected issue
+  useEffect(() => {
+    if (!settings.projectSlug || !selectedIssue) {
+      setPages([]);
+      setPagesStatus("idle");
+      return;
+    }
+
+    setPagesStatus("loading");
+    
+    // Handle special "__unassigned__" selection for orphaned pages
+    if (selectedIssue === "__unassigned__") {
+      // Filter from allPages for pages without issueLabel
+      const orphaned = allPages.filter((p) => !p.issueLabel || !p.issueLabel.trim());
+      const sorted = [...orphaned].sort((a, b) => (a.label || "").localeCompare(b.label || ""));
+      setPages(sorted);
+      setPagesStatus("ready");
+      return;
+    }
+
+    // Load pages for a specific issue from API
+    listStoryboardPages({
+      geminiKey: settings.geminiKey,
+      projectSlug: settings.projectSlug,
+      issueLabel: selectedIssue,
+    })
+      .then((list) => {
+        // Sort pages by label
+        const sorted = [...list].sort((a, b) => (a.label || "").localeCompare(b.label || ""));
+        setPages(sorted);
+        setPagesStatus("ready");
+      })
+      .catch((err) => {
+        console.error("Failed to load pages:", err);
+        setPagesStatus("error");
+      });
+  }, [settings.geminiKey, settings.projectSlug, selectedIssue, allPages]);
+
   const hasProject = Boolean(settings.projectId || settings.projectSlug);
+
+  // Handle changing a page's issue assignment
+  const handleChangePageIssue = useCallback(async (pageId: UUID, newIssue: string | null) => {
+    setUpdatingPageId(pageId);
+    try {
+      await updatePageIssue(pageId, newIssue, {
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+      // Refresh the issue list and pages
+      await refreshIssueList();
+    } catch (err) {
+      console.error("Failed to update page issue:", err);
+    } finally {
+      setUpdatingPageId(null);
+    }
+  }, [settings.geminiKey, settings.projectSlug, refreshIssueList]);
 
   const handleViewCharacter = (character: CharacterView) => {
     setSelectedCharacter(character);
@@ -1429,8 +1739,8 @@ function ProjectAssetsTab({
     <div className="pane">
       <h2>Project Assets</h2>
       <p>
-        High-level view of characters, locations, items, and storyboard pages for the active project.
-        This starts with characters; locations, items, and pages will expand as those flows grow.
+        High-level view of characters, locations, items, and pages for the active project.
+        Select an issue to see all its pages together.
       </p>
 
       {!hasProject && (
@@ -1916,10 +2226,119 @@ function ProjectAssetsTab({
           )}
 
           <div className="form-card">
-            <h3>Storyboard Pages</h3>
-            <p className="helper-text">
-              A summary of storyboard pages and panel counts per project will land here later.
-            </p>
+            <div className="project-header">
+              <div>
+                <h3>Pages</h3>
+                <p className="helper-text">
+                  {pagesStatus === "loading" && "Loading pages…"}
+                  {pagesStatus === "error" && "Failed to load pages"}
+                  {pagesStatus === "ready" && !selectedIssue && "Select an issue to view pages."}
+                  {pagesStatus === "ready" && selectedIssue && pages.length === 0 && "No pages yet for this issue."}
+                  {pagesStatus === "ready" && selectedIssue && pages.length > 0 && `${pages.length} page(s) in this issue.`}
+                </p>
+              </div>
+              <div className="project-header-actions">
+                <label htmlFor="issue-select" className="sr-only">Select Issue</label>
+                <select
+                  id="issue-select"
+                  className="header-select"
+                  value={selectedIssue}
+                  onChange={(e) => setSelectedIssue(e.target.value)}
+                  disabled={issueList.length === 0 && orphanedCount === 0}
+                >
+                  {issueList.length === 0 && orphanedCount === 0 && <option value="">No pages</option>}
+                  {issueList.map((issue) => (
+                    <option key={issue} value={issue}>
+                      {issue}
+                    </option>
+                  ))}
+                  {orphanedCount > 0 && (
+                    <option value="__unassigned__">
+                      ⚠️ Unassigned ({orphanedCount})
+                    </option>
+                  )}
+                </select>
+              </div>
+            </div>
+            {pagesStatus === "ready" && selectedIssue && pages.length > 0 && (
+              <div className="pages-gallery">
+                {pages.map((pageItem, index) => {
+                  const panels = pageItem.panels ?? [];
+                  const panelCount = panels.length;
+                  const hasAnyRenders = panels.some((p) => p.renderAssetId);
+                  const isUpdating = updatingPageId === pageItem.id;
+
+                  return (
+                    <div key={pageItem.id} className="page-card">
+                      <div 
+                        className="page-card-canvas"
+                        style={{
+                          backgroundColor: pageItem.backgroundColor || undefined,
+                        }}
+                      >
+                        {panelCount === 0 && (
+                          <div className="page-canvas-empty">
+                            <span className="page-number">{index + 1}</span>
+                          </div>
+                        )}
+                        {panels.map((panel) => (
+                          <div
+                            key={panel.id}
+                            className="page-mini-panel"
+                            style={{
+                              left: `${panel.geometry.x * 100}%`,
+                              top: `${panel.geometry.y * 100}%`,
+                              width: `${panel.geometry.width * 100}%`,
+                              height: `${panel.geometry.height * 100}%`,
+                            }}
+                          >
+                            {panel.renderAssetId && (
+                              <img
+                                src={assetHref(panel.renderAssetId)}
+                                alt=""
+                                className="page-mini-panel-image"
+                                style={{
+                                  transform: `translate(${(panel.renderOffsetX ?? 0) * 100}%, ${(panel.renderOffsetY ?? 0) * 100}%) scale(${panel.renderScale ?? 1})`,
+                                  transformOrigin: "50% 50%",
+                                }}
+                              />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="page-card-info">
+                        <span className="page-card-label">
+                          {pageItem.label || `Page ${index + 1}`}
+                        </span>
+                        <span className="page-card-meta">
+                          {panelCount} panel{panelCount !== 1 ? "s" : ""}
+                          {hasAnyRenders && " • rendered"}
+                        </span>
+                      </div>
+                      <div className="page-card-actions">
+                        <select
+                          className="page-issue-select"
+                          value={pageItem.issueLabel || "__unassigned__"}
+                          onChange={(e) => {
+                            const newIssue = e.target.value === "__unassigned__" ? null : e.target.value;
+                            void handleChangePageIssue(pageItem.id, newIssue);
+                          }}
+                          disabled={isUpdating}
+                          title="Assign to issue"
+                        >
+                          <option value="__unassigned__">Unassigned</option>
+                          {issueList.map((issue) => (
+                            <option key={issue} value={issue}>
+                              {issue}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </>
       )}
@@ -1929,8 +2348,10 @@ function ProjectAssetsTab({
 
 function PanelsTab({
   settingsController,
+  onRefreshIssues,
 }: {
   settingsController: SettingsController;
+  onRefreshIssues?: () => void;
 }) {
   const { settings, updateSetting } = settingsController;
   const [page, setPage] = useState<StoryboardPage | null>(null);
@@ -1939,6 +2360,7 @@ function PanelsTab({
   );
   const [error, setError] = useState<string | null>(null);
   const [pages, setPages] = useState<StoryboardPage[]>([]);
+  const [allProjectPages, setAllProjectPages] = useState<StoryboardPage[]>([]); // All pages across all issues for library
   const [selectedPanelId, setSelectedPanelId] = useState<UUID | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -1969,6 +2391,19 @@ function PanelsTab({
     generation: false,
   });
   const [renderModelInFlight, setRenderModelInFlight] = useState<PanelRenderModel | null>(null);
+  const [updatingPageIssue, setUpdatingPageIssue] = useState(false);
+  // Track which history index each panel is viewing (undefined = latest/current)
+  const [panelHistoryIndex, setPanelHistoryIndex] = useState<Record<UUID, number>>({});
+
+  // Get available issues from all project pages + custom issues
+  const availableIssues = useMemo(() => {
+    const issuesFromPages = allProjectPages
+      .map((p) => p.issueLabel)
+      .filter((label): label is string => Boolean(label && label.trim()));
+    const customIssues = settings.customIssues ?? [];
+    const allIssues = [...new Set([...issuesFromPages, ...customIssues])];
+    return allIssues.sort();
+  }, [allProjectPages, settings.customIssues]);
 
   const markDirty = useCallback(() => {
     setHasChanges(true);
@@ -2043,15 +2478,48 @@ function PanelsTab({
         const list = await listStoryboardPages({
           geminiKey: settings.geminiKey,
           projectSlug: settings.projectSlug,
+          issueLabel: settings.selectedIssue,
         });
         if (cancelled) return;
         setPages(list);
+        // When issue changes, switch to the first page of that issue (or null if empty)
+        setPage((currentPage) => {
+          if (!currentPage || !list.find((p) => p.id === currentPage.id)) {
+            return list[0] ?? null;
+          }
+          return currentPage;
+        });
       } catch (cause) {
         console.error("storyboard:pages_load_failed", cause);
       }
     };
 
     void loadPages();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.geminiKey, settings.projectSlug, settings.selectedIssue]);
+
+  // Load ALL pages (no issue filter) for the project library view
+  useEffect(() => {
+    let cancelled = false;
+    const loadAllPages = async () => {
+      if (!settings.projectSlug) return;
+      try {
+        const list = await listStoryboardPages({
+          geminiKey: settings.geminiKey,
+          projectSlug: settings.projectSlug,
+          // No issueLabel filter - get ALL pages for the library
+        });
+        if (cancelled) return;
+        setAllProjectPages(list);
+      } catch (cause) {
+        console.error("storyboard:all_pages_load_failed", cause);
+      }
+    };
+
+    void loadAllPages();
 
     return () => {
       cancelled = true;
@@ -2178,6 +2646,97 @@ function PanelsTab({
     if (!page || !selectedPanelId) return null;
     return page.panels.find((panel) => panel.id === selectedPanelId) ?? null;
   }, [page, selectedPanelId]);
+
+  // Get full history of render assets for a panel: [...replacedAssetIds, renderAssetId]
+  const getPanelHistory = useCallback((panel: StoryboardPanel | null): UUID[] => {
+    if (!panel) return [];
+    const history: UUID[] = [...(panel.replacedAssetIds ?? [])];
+    if (panel.renderAssetId) {
+      history.push(panel.renderAssetId);
+    }
+    return history;
+  }, []);
+
+  // Get the currently displayed asset ID for a panel (based on history index)
+  const getPanelDisplayAssetId = useCallback(
+    (panel: StoryboardPanel | null): UUID | undefined => {
+      if (!panel) return undefined;
+      const history = getPanelHistory(panel);
+      if (history.length === 0) return undefined;
+      const index = panelHistoryIndex[panel.id];
+      if (index !== undefined && index >= 0 && index < history.length) {
+        return history[index];
+      }
+      // Default to latest (renderAssetId)
+      return panel.renderAssetId;
+    },
+    [getPanelHistory, panelHistoryIndex],
+  );
+
+  // Check if we can undo (go back in history)
+  const canUndo = useMemo(() => {
+    if (!selectedPanel) return false;
+    const history = getPanelHistory(selectedPanel);
+    if (history.length <= 1) return false;
+    const currentIndex = panelHistoryIndex[selectedPanel.id] ?? history.length - 1;
+    return currentIndex > 0;
+  }, [selectedPanel, getPanelHistory, panelHistoryIndex]);
+
+  // Check if we can redo (go forward in history)
+  const canRedo = useMemo(() => {
+    if (!selectedPanel) return false;
+    const history = getPanelHistory(selectedPanel);
+    if (history.length === 0) return false;
+    const currentIndex = panelHistoryIndex[selectedPanel.id];
+    if (currentIndex === undefined) return false; // Already at latest
+    return currentIndex < history.length - 1;
+  }, [selectedPanel, getPanelHistory, panelHistoryIndex]);
+
+  // Handle undo - go back in history
+  const handlePanelUndo = useCallback(() => {
+    if (!selectedPanel || !canUndo) return;
+    const history = getPanelHistory(selectedPanel);
+    const currentIndex = panelHistoryIndex[selectedPanel.id] ?? history.length - 1;
+    const newIndex = currentIndex - 1;
+    setPanelHistoryIndex((previous) => ({
+      ...previous,
+      [selectedPanel.id]: newIndex,
+    }));
+  }, [selectedPanel, canUndo, getPanelHistory, panelHistoryIndex]);
+
+  // Handle redo - go forward in history
+  const handlePanelRedo = useCallback(() => {
+    if (!selectedPanel || !canRedo) return;
+    const history = getPanelHistory(selectedPanel);
+    const currentIndex = panelHistoryIndex[selectedPanel.id] ?? history.length - 1;
+    const newIndex = currentIndex + 1;
+    if (newIndex >= history.length - 1) {
+      // At latest, clear the index
+      setPanelHistoryIndex((previous) => {
+        const updated = { ...previous };
+        delete updated[selectedPanel.id];
+        return updated;
+      });
+    } else {
+      setPanelHistoryIndex((previous) => ({
+        ...previous,
+        [selectedPanel.id]: newIndex,
+      }));
+    }
+  }, [selectedPanel, canRedo, getPanelHistory, panelHistoryIndex]);
+
+  // Get current history position info for display
+  const historyInfo = useMemo(() => {
+    if (!selectedPanel) return null;
+    const history = getPanelHistory(selectedPanel);
+    if (history.length === 0) return null;
+    const currentIndex = panelHistoryIndex[selectedPanel.id] ?? history.length - 1;
+    return {
+      current: currentIndex + 1,
+      total: history.length,
+      isLatest: currentIndex === history.length - 1,
+    };
+  }, [selectedPanel, getPanelHistory, panelHistoryIndex]);
 
   useEffect(() => {
     const character =
@@ -2375,13 +2934,14 @@ function PanelsTab({
       const list = await listStoryboardPages({
         geminiKey: settings.geminiKey,
         projectSlug: settings.projectSlug,
+        issueLabel: settings.selectedIssue,
       });
       setPages(list);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to load layout");
       setStatus("error");
     }
-  }, [markLayoutLoaded, settings.geminiKey, settings.projectSlug]);
+  }, [markLayoutLoaded, settings.geminiKey, settings.projectSlug, settings.selectedIssue]);
 
   const handlePageLabelChange = useCallback(
     (value: string) => {
@@ -2418,7 +2978,48 @@ function PanelsTab({
       markDirty();
       updateSetting("defaultPageBackgroundColor", value);
     },
-    [page, markDirty, updateSetting],
+    [markDirty, page, updateSetting],
+  );
+
+  // Change the current page's issue assignment
+  const handlePageIssueChange = useCallback(
+    async (newIssue: string | null) => {
+      if (!page) return;
+      setUpdatingPageIssue(true);
+      try {
+        const updated = await updatePageIssue(page.id, newIssue, {
+          geminiKey: settings.geminiKey,
+          projectSlug: settings.projectSlug,
+        });
+        // Update local page state
+        setPage(updated);
+        // Update the selected issue setting if we moved to a different issue
+        if (newIssue && newIssue !== settings.selectedIssue) {
+          updateSetting("selectedIssue", newIssue);
+        }
+        // Refresh all project pages
+        const allList = await listStoryboardPages({
+          geminiKey: settings.geminiKey,
+          projectSlug: settings.projectSlug,
+        });
+        setAllProjectPages(allList);
+        // Refresh the current issue's pages
+        const filteredList = await listStoryboardPages({
+          geminiKey: settings.geminiKey,
+          projectSlug: settings.projectSlug,
+          issueLabel: newIssue ?? settings.selectedIssue,
+        });
+        setPages(filteredList);
+        // Notify parent to refresh issues
+        onRefreshIssues?.();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to update page issue");
+        setStatus("error");
+      } finally {
+        setUpdatingPageIssue(false);
+      }
+    },
+    [page, settings.geminiKey, settings.projectSlug, settings.selectedIssue, updateSetting, onRefreshIssues],
   );
 
   const statusMessage = useMemo(() => {
@@ -2722,6 +3323,7 @@ function PanelsTab({
       let next = await createStoryboardPageApi({
         geminiKey: settings.geminiKey,
         projectSlug: settings.projectSlug,
+        issueLabel: settings.selectedIssue,
       });
 
       if (settings.defaultPageBackgroundColor) {
@@ -2734,12 +3336,27 @@ function PanelsTab({
 
       markLayoutLoaded(next);
       setSelectedPanelId(next.panels[0]?.id ?? null);
+      // Refresh pages list for this issue
+      const list = await listStoryboardPages({
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+        issueLabel: settings.selectedIssue,
+      });
+      setPages(list);
+      // Also refresh all project pages for the library
+      const allList = await listStoryboardPages({
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+      setAllProjectPages(allList);
+      // Notify parent to refresh issues list if this is a new issue
+      onRefreshIssues?.();
       setStatus("saved");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to create page");
       setStatus("error");
     }
-  }, [markLayoutLoaded, settings.geminiKey, settings.projectSlug, settings.defaultPageBackgroundColor]);
+  }, [markLayoutLoaded, settings.geminiKey, settings.projectSlug, settings.defaultPageBackgroundColor, settings.selectedIssue, onRefreshIssues]);
 
   const handleDeletePage = useCallback(async () => {
     if (!page) return;
@@ -2758,14 +3375,23 @@ function PanelsTab({
       const list = await listStoryboardPages({
         geminiKey: settings.geminiKey,
         projectSlug: settings.projectSlug,
+        issueLabel: settings.selectedIssue,
       });
       setPages(list);
+      // Also refresh all project pages for the library
+      const allList = await listStoryboardPages({
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+      setAllProjectPages(allList);
+      // Refresh issues list in case this was the last page for an issue
+      onRefreshIssues?.();
       setStatus("saved");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to delete page");
       setStatus("error");
     }
-  }, [markLayoutLoaded, page, settings.geminiKey, settings.projectSlug]);
+  }, [markLayoutLoaded, page, settings.geminiKey, settings.projectSlug, settings.selectedIssue, onRefreshIssues]);
 
   const handleSelectPage = useCallback(
     async (pageId: UUID) => {
@@ -2860,8 +3486,24 @@ function PanelsTab({
           next.splice(index, 1, result.page);
           return next;
         });
+        // Also update allProjectPages for the library view
+        setAllProjectPages((previous) => {
+          const index = previous.findIndex((candidate) => candidate.id === result.page.id);
+          if (index === -1) {
+            return [...previous, result.page];
+          }
+          const next = [...previous];
+          next.splice(index, 1, result.page);
+          return next;
+        });
+        // Reset history index to show the new upload (latest)
+        setPanelHistoryIndex((previous) => {
+          const updated = { ...previous };
+          delete updated[panelId];
+          return updated;
+        });
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Failed to replace panel image");
+        setError(cause instanceof Error ? cause.message : "Failed to upload panel image");
         setStatus("error");
       } finally {
         setPanelLibraryUploading((previous) => {
@@ -3086,6 +3728,12 @@ function PanelsTab({
         projectSlug: settings.projectSlug,
       });
       setPage(result.page);
+      // Reset history index to show the new render (latest)
+      setPanelHistoryIndex((previous) => {
+        const updated = { ...previous };
+        delete updated[selectedPanel.id];
+        return updated;
+      });
       setStatus("saved");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to generate panel image");
@@ -3293,14 +3941,17 @@ function PanelsTab({
 
   const isFreeMode = Boolean(selectedPanel?.geometry.cornerOffsets);
 
+  // allPages combines ALL project pages (from all issues) with the current page for the library
   const allPages = useMemo(() => {
     const map = new Map<UUID, StoryboardPage>();
-    pages.forEach((candidate) => map.set(candidate.id, candidate));
+    // Use allProjectPages (all issues) for the library, not pages (which is filtered by issue)
+    allProjectPages.forEach((candidate) => map.set(candidate.id, candidate));
+    // Also include the current page in case it has unsaved changes
     if (page) {
       map.set(page.id, page);
     }
     return Array.from(map.values()).sort((a, b) => (a.label || "").localeCompare(b.label || ""));
-  }, [page, pages]);
+  }, [page, allProjectPages]);
 
   const pageLookup = useMemo(() => new Map(allPages.map((candidate) => [candidate.id, candidate])), [allPages]);
 
@@ -3352,6 +4003,35 @@ function PanelsTab({
     });
   }, [allPages]);
 
+  // Collect replaced/unused images from all panels
+  const replacedImages = useMemo(() => {
+    type ReplacedImageEntry = {
+      assetId: UUID;
+      panelId: UUID;
+      panelLabel: string;
+      pageLabel: string;
+    };
+
+    const entries: ReplacedImageEntry[] = [];
+
+    allPages.forEach((pageItem) => {
+      const pageLabel = pageItem.label || "Page";
+      (pageItem.panels ?? []).forEach((panel) => {
+        const replaced = panel.replacedAssetIds ?? [];
+        replaced.forEach((assetId) => {
+          entries.push({
+            assetId,
+            panelId: panel.id,
+            panelLabel: panel.label || `Panel ${(panel.order ?? 0) + 1}`,
+            pageLabel,
+          });
+        });
+      });
+    });
+
+    return entries;
+  }, [allPages]);
+
   const handleProjectLibraryTargetChange = useCallback(
     (panelId: UUID, updates: { pageId?: UUID | ""; panelId?: UUID | "" }) => {
       setProjectLibraryTargets((previous) => {
@@ -3372,7 +4052,12 @@ function PanelsTab({
   return (
     <div className="pane pane-storyboard">
       <div className="pane-header">
-        <h2>Storyboard Planner</h2>
+        <h2>
+          Storyboard Planner
+          {settings.selectedIssue && (
+            <span className="issue-badge">{settings.selectedIssue}</span>
+          )}
+        </h2>
         <div className="subtabs" aria-label="Storyboard mode">
           <button
             type="button"
@@ -3397,6 +4082,11 @@ function PanelsTab({
           </button>
         </div>
       </div>
+      {!settings.selectedIssue && (
+        <p className="helper-text" style={{ color: "rgba(255, 180, 100, 0.85)" }}>
+          💡 Select an issue from the header to view its storyboard. Each issue has its own set of pages.
+        </p>
+      )}
       <p>
         Lay out panels with adjustable boxes. Select references from the other tabs and describe the action to
         generate comic-ready frames.
@@ -3508,20 +4198,26 @@ function PanelsTab({
                     setSelectedPanelId(panel.id);
                   }}
                 >
-                  {panel.renderAssetId && (
-                    <img
-                      src={assetHref(panel.renderAssetId)}
-                      alt={panel.label || "Panel render"}
-                      className="storyboard-panel-image"
-                      style={{
-                        transform: `translate(${(panel.renderOffsetX ?? 0) * 100}%, ${(panel.renderOffsetY ?? 0) * 100}%) scale(${panel.renderScale ?? 1}) rotate(${panel.rotation ?? 0}deg)`,
-                        transformOrigin: "50% 50%",
-                        pointerEvents: editingPanelId === panel.id ? "auto" : "none",
-                        cursor: editingPanelId === panel.id ? "grab" : "default",
-                      }}
-                      onPointerDown={editingPanelId === panel.id ? beginImagePan(panel.id) : undefined}
-                    />
-                  )}
+                  {(() => {
+                    // For selected panel, use history-aware display; for others use current render
+                    const displayAssetId = selectedPanelId === panel.id
+                      ? getPanelDisplayAssetId(panel)
+                      : panel.renderAssetId;
+                    return displayAssetId ? (
+                      <img
+                        src={assetHref(displayAssetId)}
+                        alt={panel.label || "Panel render"}
+                        className="storyboard-panel-image"
+                        style={{
+                          transform: `translate(${(panel.renderOffsetX ?? 0) * 100}%, ${(panel.renderOffsetY ?? 0) * 100}%) scale(${panel.renderScale ?? 1}) rotate(${panel.rotation ?? 0}deg)`,
+                          transformOrigin: "50% 50%",
+                          pointerEvents: editingPanelId === panel.id ? "auto" : "none",
+                          cursor: editingPanelId === panel.id ? "grab" : "default",
+                        }}
+                        onPointerDown={editingPanelId === panel.id ? beginImagePan(panel.id) : undefined}
+                      />
+                    ) : null;
+                  })()}
                   
                   {offsets && panel.strokeWidth && panel.strokeWidth > 0 && (
                      <svg 
@@ -3780,6 +4476,26 @@ function PanelsTab({
                     onChange={(event) => handlePageBackgroundChange(event.target.value)}
                     disabled={!page}
                   />
+                </div>
+                <div className="field">
+                  <label htmlFor="page-issue">Issue</label>
+                  <select
+                    id="page-issue"
+                    value={page?.issueLabel ?? "__unassigned__"}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      void handlePageIssueChange(value === "__unassigned__" ? null : value);
+                    }}
+                    disabled={!page || updatingPageIssue}
+                  >
+                    <option value="__unassigned__">Unassigned</option>
+                    {availableIssues.map((issue) => (
+                      <option key={issue} value={issue}>
+                        {issue}
+                      </option>
+                    ))}
+                  </select>
+                  {updatingPageIssue && <span className="helper-text">Updating...</span>}
                 </div>
               </>
             )}
@@ -4046,14 +4762,42 @@ function PanelsTab({
                           {renderButtonLabel("nano-banana-pro")}
                         </button>
                       </div>
+                      <div className="panel-history-buttons">
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={handlePanelUndo}
+                          disabled={!canUndo || status === "generating"}
+                          title="Undo - go to previous render"
+                        >
+                          ← Undo
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={handlePanelRedo}
+                          disabled={!canRedo || status === "generating"}
+                          title="Redo - go to next render"
+                        >
+                          Redo →
+                        </button>
+                      </div>
+                      {historyInfo && historyInfo.total > 1 && (
+                        <p className="helper-text history-indicator">
+                          Viewing render {historyInfo.current} of {historyInfo.total}
+                          {!historyInfo.isLatest && " (older version)"}
+                        </p>
+                      )}
                       <p className="helper-text">Nano Banana is the default; Nano Banana Pro leans into fidelity.</p>
                     </div>
-                    {selectedPanel.renderAssetId && (
+                    {getPanelDisplayAssetId(selectedPanel) && (
                       <div className="field">
-                        <label>Latest render</label>
+                        <label>
+                          {historyInfo && !historyInfo.isLatest ? "Previous render" : "Latest render"}
+                        </label>
                         <div className="asset-preview">
                           <img
-                            src={assetHref(selectedPanel.renderAssetId)}
+                            src={assetHref(getPanelDisplayAssetId(selectedPanel)!)}
                             alt={selectedPanel.label || "Panel render"}
                             style={{ maxWidth: "100%", borderRadius: 4 }}
                           />
@@ -4128,7 +4872,7 @@ function PanelsTab({
                   Download
                 </a>
                 <label className="upload">
-                  Replace
+                  {panel.renderAssetId ? "Replace" : "Upload"}
                   <input
                     type="file"
                     accept="image/*"
@@ -4269,6 +5013,41 @@ function PanelsTab({
                 );
               })}
             </div>
+          )}
+
+          {/* Replaced/Unused Images Section */}
+          {replacedImages.length > 0 && (
+            <>
+              <div className="project-library-header" style={{ marginTop: "1.5rem" }}>
+                <h3>Replaced Images</h3>
+                <p className="helper-text">
+                  {replacedImages.length} image{replacedImages.length === 1 ? "" : "s"} from previous renders.
+                  These were replaced when you generated new images.
+                </p>
+              </div>
+              <div className="storyboard-library">
+                {replacedImages.map(({ assetId, panelLabel, pageLabel }) => (
+                  <div key={assetId} className="library-card library-card-replaced">
+                    <div className="library-thumb">
+                      <img src={assetHref(assetId)} alt="Previous render" />
+                    </div>
+                    <div className="library-meta">
+                      <strong>{panelLabel}</strong>
+                      <span className="helper-text">{pageLabel} · Replaced</span>
+                    </div>
+                    <div className="library-actions">
+                      <a
+                        href={assetHref(assetId)}
+                        download={`replaced-${assetId.slice(0, 8)}.png`}
+                        className="ghost"
+                      >
+                        Download
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -4736,4 +5515,5 @@ function SettingsTab({
 }
 
 export default App;
+
 

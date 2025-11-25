@@ -51,11 +51,118 @@ body {
 .app-header-controls {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem;
 }
 
-.header-project-picker {
-  min-width: 220px;
+.header-select {
+  background: rgba(9, 12, 19, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.5rem;
+  color: inherit;
+  font: inherit;
+  padding: 0.55rem 0.75rem;
+  min-width: 160px;
+  cursor: pointer;
+}
+
+.header-select:focus {
+  outline: none;
+  border-color: rgba(124, 189, 255, 0.6);
+}
+
+.header-btn {
+  background: rgba(9, 12, 19, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.5rem;
+  color: inherit;
+  font: inherit;
+  padding: 0.55rem 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.header-btn:hover {
+  background: rgba(124, 189, 255, 0.15);
+  border-color: rgba(124, 189, 255, 0.4);
+}
+
+.header-btn-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.header-divider {
+  width: 1px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.15);
+  margin: 0 0.25rem;
+}
+
+/* Modal styles */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-content {
+  background: rgba(13, 18, 28, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  min-width: 360px;
+  max-width: 90vw;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  animation: slideUp 0.2s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.new-project-modal h3,
+.new-issue-modal h3 {
+  margin: 0 0 1rem;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.new-project-modal .field,
+.new-issue-modal .field {
+  margin-bottom: 0.75rem;
+}
+
+.new-issue-modal {
+  min-width: 300px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 1.25rem;
 }
 
 .app-main {
@@ -276,6 +383,44 @@ textarea {
 .panel-generation-buttons button {
   flex: 1 1 220px;
   min-width: 220px;
+}
+
+.panel-history-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.panel-history-buttons button {
+  flex: 1;
+  min-width: 0;
+}
+
+.panel-history-buttons button.secondary {
+  background: rgba(40, 45, 60, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.85);
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.panel-history-buttons button.secondary:hover:not(:disabled) {
+  background: rgba(55, 60, 80, 0.95);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.panel-history-buttons button.secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.helper-text.history-indicator {
+  color: rgba(255, 200, 100, 0.9);
+  font-weight: 500;
 }
 
 .field.multi.compact {
@@ -675,6 +820,20 @@ label.upload.is-disabled {
   margin-bottom: 0.5rem;
 }
 
+.issue-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: linear-gradient(120deg, rgba(90, 200, 255, 0.25), rgba(161, 109, 245, 0.25));
+  border: 1px solid rgba(161, 109, 245, 0.4);
+  color: #c4a8ff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
 .slot-form {
   display: grid;
   gap: 1rem;
@@ -771,4 +930,145 @@ label.upload.is-disabled {
 
 .corner-controls input[type="number"] {
   width: 100%;
+}
+
+/* Screen reader only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Project header actions */
+.project-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Pages gallery */
+.pages-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.page-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 0.75rem;
+  background: rgba(7, 10, 18, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.page-card:hover {
+  border-color: rgba(124, 189, 255, 0.5);
+  transform: translateY(-2px);
+}
+
+/* Mini storyboard canvas for page preview */
+.page-card-canvas {
+  position: relative;
+  aspect-ratio: 6.625 / 10.25;
+  background: radial-gradient(circle at top, rgba(40, 60, 90, 0.6), rgba(6, 9, 14, 0.95));
+  overflow: hidden;
+}
+
+.page-canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, rgba(40, 55, 80, 0.3), transparent);
+}
+
+.page-number {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: rgba(124, 189, 255, 0.3);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.page-mini-panel {
+  position: absolute;
+  border-radius: 0.15rem;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(5, 7, 12, 0.85);
+  overflow: hidden;
+}
+
+.page-mini-panel-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.page-card-info {
+  padding: 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.page-card-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(245, 246, 249, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.page-card-meta {
+  font-size: 0.7rem;
+  color: rgba(245, 246, 249, 0.5);
+}
+
+.page-card-actions {
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.page-issue-select {
+  width: 100%;
+  font-size: 0.75rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(9, 12, 19, 0.95);
+  color: inherit;
+  cursor: pointer;
+}
+
+.page-issue-select:hover {
+  border-color: rgba(124, 189, 255, 0.4);
+}
+
+.page-issue-select:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+/* Replaced images in library have a subtle visual indicator */
+.library-card-replaced {
+  border-color: rgba(255, 180, 100, 0.25);
+  background: rgba(20, 16, 12, 0.95);
+}
+
+.library-card-replaced .library-thumb {
+  opacity: 0.85;
 }

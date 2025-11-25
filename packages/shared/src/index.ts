@@ -80,6 +80,8 @@ export interface PanelPrompt {
   notes?: string;
   /** Optional rendered image asset for this panel. */
   renderAssetId?: UUID;
+  /** Previous render asset IDs that were replaced (for history/undo). */
+  replacedAssetIds?: UUID[];
   /** Optional scale factor for the rendered image within the panel. */
   renderScale?: number;
   /** Optional horizontal offset for the rendered image within the panel (fraction of panel width). */
@@ -129,8 +131,10 @@ export interface StoryboardPage {
   width: number;
   height: number;
   panels: StoryboardPanel[];
-   /** Optional background color for the page (CSS color string). */
+  /** Optional background color for the page (CSS color string). */
   backgroundColor?: string;
+  /** Issue label this page belongs to (for multi-issue projects). */
+  issueLabel?: string;
   createdAt: string;
   updatedAt: string;
 }
