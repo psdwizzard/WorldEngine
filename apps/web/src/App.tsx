@@ -400,7 +400,6 @@ export function App() {
       <header className="app-header">
         <div className="branding">
           <span className="brand-title">World Generator</span>
-          <span className="brand-subtitle">Gemini 2.5 Flash comic pre-production toolkit</span>
         </div>
         <div className="app-header-controls">
           <select
@@ -555,7 +554,6 @@ export function App() {
               onClick={() => setActiveTab(tab.key)}
             >
               <span className="tab-label">{tab.label}</span>
-              <span className="tab-description">{tab.description}</span>
             </button>
           ))}
         </aside>

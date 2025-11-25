@@ -167,51 +167,77 @@ body {
 
 .app-main {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 55px 1fr;
   flex: 1;
   min-height: 0;
+  background-image: url("/background.png");
+  background-repeat: repeat;
+  background-attachment: fixed;
+  position: relative;
 }
 
 .tab-nav {
-  padding: 1rem;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.75rem 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  background: rgba(12, 16, 24, 0.85);
+  gap: 0.25rem;
+  background: rgba(12, 16, 24, 0.95);
+  backdrop-filter: blur(8px);
 }
 
 .tab-link {
-  text-align: left;
-  border: 1px solid transparent;
-  border-radius: 0.75rem;
-  padding: 0.85rem;
-  background: rgba(255, 255, 255, 0.03);
-  color: inherit;
+  text-align: center;
+  border: none;
+  border-left: 4px solid transparent;
+  border-radius: 0;
+  padding: 0.75rem 0.25rem;
+  background: transparent;
+  color: rgba(245, 246, 249, 0.7);
   cursor: pointer;
   display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  transition: border 0.2s ease, background 0.2s ease, transform 0.2s ease;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  position: relative;
+  min-height: 120px;
+  width: 100%;
 }
 
 .tab-link:hover {
-  transform: translateX(4px);
-  border-color: rgba(124, 189, 255, 0.5);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(245, 246, 249, 0.9);
 }
 
 .tab-link.is-active {
-  border-color: rgba(124, 189, 255, 0.8);
-  background: rgba(33, 78, 140, 0.4);
+  border-left-color: #5ac8ff;
+  background: linear-gradient(90deg, rgba(90, 200, 255, 0.15), transparent);
+  color: #5ac8ff;
+}
+
+.tab-link.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  height: 100%;
+  background: linear-gradient(180deg, #5ac8ff, #a16df5);
+  box-shadow: 0 0 8px rgba(90, 200, 255, 0.5);
 }
 
 .tab-label {
   font-weight: 600;
+  font-size: 0.75rem;
+  transform: rotate(-90deg);
+  white-space: nowrap;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .tab-description {
-  font-size: 0.8rem;
-  color: rgba(245, 246, 249, 0.7);
+  display: none;
 }
 
 .tab-content {
