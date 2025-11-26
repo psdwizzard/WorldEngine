@@ -83,6 +83,23 @@ const captionBoxSchema = z.object({
   updatedAt: z.string(),
 });
 
+const bubbleSchema = z.object({
+  id: z.string().uuid(),
+  type: z.enum(["speech", "thought"]),
+  geometry: geometrySchema,
+  text: z.string(),
+  fontFamily: z.string().optional(),
+  fontSize: z.number().finite().positive().optional(),
+  fill: z.string(),
+  stroke: z.string(),
+  strokeWidth: z.number().finite().min(0),
+  tailAngle: z.number().finite(),
+  tailLength: z.number().finite().min(0).max(1),
+  order: z.number().int().nonnegative(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 const storyboardPageSchema = z.object({
   id: z.string().uuid(),
   label: z.string().min(1),
@@ -92,6 +109,7 @@ const storyboardPageSchema = z.object({
   issueLabel: z.string().optional(),
   panels: z.array(storyboardPanelSchema),
   captionBoxes: z.array(captionBoxSchema).optional(),
+  bubbles: z.array(bubbleSchema).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

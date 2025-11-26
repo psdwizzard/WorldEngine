@@ -156,6 +156,38 @@ export interface StoryboardCaptionBox {
   updatedAt: string;
 }
 
+/** Type of speech/thought bubble. */
+export type BubbleType = "speech" | "thought";
+
+/** A speech or thought bubble. */
+export interface StoryboardBubble {
+  id: UUID;
+  /** Type of bubble - speech or thought. */
+  type: BubbleType;
+  /** Position and size on the canvas (0-1 fractions). */
+  geometry: PanelGeometry;
+  /** Text content of the bubble. */
+  text: string;
+  /** Font family for the text. */
+  fontFamily?: string;
+  /** Font size in rem units. */
+  fontSize?: number;
+  /** Background fill color. */
+  fill: string;
+  /** Border stroke color. */
+  stroke: string;
+  /** Border stroke width in pixels. */
+  strokeWidth: number;
+  /** Tail direction as angle in degrees (0 = right, 90 = down, 180 = left, 270 = up). */
+  tailAngle: number;
+  /** Tail length as fraction of bubble size (0-1). */
+  tailLength: number;
+  /** Z-index order (higher = on top). */
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StoryboardPage {
   id: UUID;
   label: string;
@@ -164,6 +196,8 @@ export interface StoryboardPage {
   panels: StoryboardPanel[];
   /** Caption boxes on this page. */
   captionBoxes?: StoryboardCaptionBox[];
+  /** Speech and thought bubbles on this page. */
+  bubbles?: StoryboardBubble[];
   /** Optional background color for the page (CSS color string). */
   backgroundColor?: string;
   /** Issue label this page belongs to (for multi-issue projects). */

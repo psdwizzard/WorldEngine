@@ -1,6 +1,7 @@
 import type { ChangeEvent, FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  BubbleType,
   CharacterAngle,
   CharacterTurnaroundSlot,
   ItemAngle,
@@ -14,6 +15,7 @@ import type {
   StoryboardPage,
   StoryboardPanel,
   StoryboardCaptionBox,
+  StoryboardBubble,
   UUID,
 } from "@worldengine/shared";
 import { PANEL_RENDER_MODEL_LABELS } from "@worldengine/shared";
@@ -48,7 +50,7 @@ import {
   deleteStoryboardPageApi,
   updatePageIssue,
 } from "./lib/api";
-import { CaptionBox, FontSelector } from "./components";
+import { CaptionBox, FontSelector, SpeechBubble } from "./components";
 import "./App.css";
 
 function assetHref(pathOrId: string) {
@@ -67,6 +69,12 @@ function assetHref(pathOrId: string) {
 
 const MIN_PANEL_SIZE = 0.12;
 const MIN_CAPTION_SIZE = 0.03; // Smaller minimum for caption boxes
+const BUBBLE_VIEWBOX_WIDTH = 200;
+const BUBBLE_VIEWBOX_HEIGHT = 150;
+const BUBBLE_PADDING = 8;
+const BUBBLE_TAIL_LIFT = 0.3;
+const SPEECH_TAIL_SCALE = 0.6;
+const THOUGHT_TAIL_SCALE = 0.5;
 
 type ResizeCorner = "nw" | "ne" | "sw" | "se";
 type InteractionMode = "move" | "resize" | "image-pan";
@@ -91,6 +99,8 @@ type InteractionState = {
   panelHeight?: number;
   /** Whether this interaction is for a caption box (vs a panel). */
   isCaptionBox?: boolean;
+  /** Whether this interaction is for a speech/thought bubble. */
+  isBubble?: boolean;
 };
 
 function clampFraction(value: number, min = 0, max = 1) {
@@ -2366,6 +2376,7 @@ function PanelsTab({
   const [allProjectPages, setAllProjectPages] = useState<StoryboardPage[]>([]); // All pages across all issues for library
   const [selectedPanelId, setSelectedPanelId] = useState<UUID | null>(null);
   const [selectedCaptionId, setSelectedCaptionId] = useState<UUID | null>(null);
+  const [selectedBubbleId, setSelectedBubbleId] = useState<UUID | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const interactionRef = useRef<InteractionState | null>(null);
@@ -2394,6 +2405,7 @@ function PanelsTab({
     panel: true,
     generation: true,
     caption: true,
+    bubble: true,
   });
   const [renderModelInFlight, setRenderModelInFlight] = useState<PanelRenderModel | null>(null);
   const [updatingPageIssue, setUpdatingPageIssue] = useState(false);
@@ -2689,6 +2701,113 @@ function PanelsTab({
     return page.captionBoxes?.find((c) => c.id === selectedCaptionId) ?? null;
   }, [page, selectedCaptionId]);
 
+  // Bubble helpers
+  const updateBubble = useCallback(
+    (bubbleId: UUID, updates: Partial<StoryboardBubble>) => {
+      let didChange = false;
+      setPage((previous) => {
+        if (!previous) return previous;
+        const bubbles = previous.bubbles ?? [];
+        const bubbleIndex = bubbles.findIndex((b) => b.id === bubbleId);
+        if (bubbleIndex === -1) return previous;
+
+        const bubble = bubbles[bubbleIndex];
+        const entries = Object.entries(updates) as Array<[keyof StoryboardBubble, unknown]>;
+        const hasDelta = entries.some(([key, value]) => {
+          if (key === "geometry" && value) {
+            return geometryChanged(bubble.geometry, value as PanelGeometry);
+          }
+          return (bubble as Record<string, unknown>)[key as string] !== value;
+        });
+
+        if (!hasDelta) return previous;
+
+        didChange = true;
+        const updatedBubble: StoryboardBubble = {
+          ...bubble,
+          ...updates,
+          updatedAt: new Date().toISOString(),
+        };
+
+        const newBubbles = [...bubbles];
+        newBubbles.splice(bubbleIndex, 1, updatedBubble);
+
+        return {
+          ...previous,
+          bubbles: newBubbles,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+
+      if (didChange) {
+        markDirty();
+      }
+    },
+    [markDirty],
+  );
+
+  const handleCreateBubble = useCallback((type: BubbleType) => {
+    if (!page) return;
+
+    const now = new Date().toISOString();
+    const newBubble: StoryboardBubble = {
+      id: crypto.randomUUID() as UUID,
+      type,
+      geometry: { x: 0.1, y: 0.1, width: 0.25, height: 0.12 },
+      text: type === "speech" ? "Hello!" : "Hmm...",
+      fontFamily: "Comic Sans MS, cursive",
+      fontSize: 0.85,
+      fill: "#ffffff",
+      stroke: "#000000",
+      strokeWidth: 2,
+      tailAngle: 240,
+      tailLength: 0.25,
+      order: (page.bubbles?.length ?? 0) + 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    setPage((previous) => {
+      if (!previous) return previous;
+      return {
+        ...previous,
+        bubbles: [...(previous.bubbles ?? []), newBubble],
+        updatedAt: now,
+      };
+    });
+
+    setSelectedBubbleId(newBubble.id);
+    setSelectedPanelId(null);
+    setSelectedCaptionId(null);
+    markDirty();
+  }, [page, markDirty]);
+
+  const handleDeleteBubble = useCallback(
+    (bubbleId: UUID) => {
+      setPage((previous) => {
+        if (!previous) return previous;
+        const bubbles = previous.bubbles ?? [];
+        const filtered = bubbles.filter((b) => b.id !== bubbleId);
+        if (filtered.length === bubbles.length) return previous;
+        return {
+          ...previous,
+          bubbles: filtered,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+      if (selectedBubbleId === bubbleId) {
+        setSelectedBubbleId(null);
+      }
+      markDirty();
+    },
+    [selectedBubbleId, markDirty],
+  );
+
+  const selectedBubble = useMemo(() => {
+    if (!page || !selectedBubbleId) return null;
+    return page.bubbles?.find((b) => b.id === selectedBubbleId) ?? null;
+  }, [page, selectedBubbleId]);
+
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
       const interaction = interactionRef.current;
@@ -2706,14 +2825,18 @@ function PanelsTab({
         const nextGeometry = moveGeometry(interaction.origin, dx, dy);
         if (interaction.isCaptionBox) {
           updateCaptionBox(interaction.panelId, { geometry: nextGeometry });
+        } else if (interaction.isBubble) {
+          updateBubble(interaction.panelId, { geometry: nextGeometry });
         } else {
           updateGeometry(interaction.panelId, nextGeometry);
         }
       } else if (interaction.mode === "resize" && interaction.corner) {
-        const minSize = interaction.isCaptionBox ? MIN_CAPTION_SIZE : MIN_PANEL_SIZE;
+        const minSize = (interaction.isCaptionBox || interaction.isBubble) ? MIN_CAPTION_SIZE : MIN_PANEL_SIZE;
         const nextGeometry = resizeGeometry(interaction.origin, dx, dy, interaction.corner, minSize);
         if (interaction.isCaptionBox) {
           updateCaptionBox(interaction.panelId, { geometry: nextGeometry });
+        } else if (interaction.isBubble) {
+          updateBubble(interaction.panelId, { geometry: nextGeometry });
         } else {
           updateGeometry(interaction.panelId, nextGeometry);
         }
@@ -2745,7 +2868,7 @@ function PanelsTab({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [updateGeometry, updateCaptionBox]);
+  }, [updateGeometry, updateCaptionBox, updateBubble]);
 
   useEffect(() => {
     if (!page || !selectedPanelId) return;
@@ -3921,6 +4044,176 @@ function PanelsTab({
         ctx.restore();
       }
 
+      // Draw speech/thought bubbles
+      const bubbleExportScale = exportScaleX;
+      const bubbles = page.bubbles ?? [];
+      for (const bubble of bubbles) {
+        const bubX = bubble.geometry.x * width;
+        const bubY = bubble.geometry.y * height;
+        const bubW = bubble.geometry.width * width;
+        const bubH = bubble.geometry.height * height;
+
+        const scaleX = bubW / BUBBLE_VIEWBOX_WIDTH;
+        const scaleY = bubH / BUBBLE_VIEWBOX_HEIGHT;
+        const convertX = (value: number) => bubX + value * scaleX;
+        const convertY = (value: number) => bubY + value * scaleY;
+
+        const cxNorm = BUBBLE_VIEWBOX_WIDTH * 0.5;
+        const cyNorm = BUBBLE_VIEWBOX_HEIGHT * (0.5 - bubble.tailLength * BUBBLE_TAIL_LIFT);
+        const rxNorm = BUBBLE_VIEWBOX_WIDTH * 0.5 - BUBBLE_PADDING * 2;
+        const ryNorm =
+          BUBBLE_VIEWBOX_HEIGHT * 0.5 - BUBBLE_PADDING * 2 - BUBBLE_VIEWBOX_HEIGHT * bubble.tailLength * BUBBLE_TAIL_LIFT;
+
+        ctx.save();
+
+        if (bubble.type === "thought") {
+          // Draw thought bubble (cloud shape)
+          const numBumps = 10;
+          const points: Array<{ x: number; y: number; bx: number; by: number }> = [];
+
+          for (let i = 0; i < numBumps; i++) {
+            const angle = (i / numBumps) * Math.PI * 2;
+            const nextAngle = ((i + 1) / numBumps) * Math.PI * 2;
+            const midAngle = (angle + nextAngle) / 2;
+            const bumpOut = 0.15 * Math.sin(i * 2.3 + 1);
+            const nx = cxNorm + rxNorm * (1 + bumpOut) * Math.cos(angle);
+            const ny = cyNorm + ryNorm * (1 + bumpOut) * Math.sin(angle);
+            const x = convertX(nx);
+            const y = convertY(ny);
+            const bumpFactor = 0.2 + 0.1 * Math.sin(i * 3.7);
+            const nbx = cxNorm + rxNorm * (1 + bumpFactor) * Math.cos(midAngle);
+            const nby = cyNorm + ryNorm * (1 + bumpFactor) * Math.sin(midAngle);
+            const bx = convertX(nbx);
+            const by = convertY(nby);
+            points.push({ x, y, bx, by });
+          }
+
+          // Draw cloud shape
+          ctx.beginPath();
+          ctx.moveTo(points[0].x, points[0].y);
+          for (let i = 0; i < points.length; i++) {
+            const next = points[(i + 1) % points.length];
+            ctx.quadraticCurveTo(points[i].bx, points[i].by, next.x, next.y);
+          }
+          ctx.closePath();
+          ctx.fillStyle = bubble.fill;
+          ctx.fill();
+          ctx.lineWidth = bubble.strokeWidth * bubbleExportScale;
+          ctx.strokeStyle = bubble.stroke;
+          ctx.stroke();
+
+          // Draw thought circles (trailing from bubble)
+          const angleRad = (bubble.tailAngle * Math.PI) / 180;
+          const tailLengthNorm = bubble.tailLength * BUBBLE_VIEWBOX_HEIGHT * THOUGHT_TAIL_SCALE;
+          const totalTailLength = tailLengthNorm * 2.2;
+          const numCircles = 3;
+          const startDistNorm = Math.max(rxNorm, ryNorm) * 0.85;
+          for (let i = 0; i < numCircles; i++) {
+            const t = (i + 1) / numCircles;
+            const distanceNorm = startDistNorm + totalTailLength * t;
+            const circleX = convertX(cxNorm + distanceNorm * Math.cos(angleRad));
+            const circleY = convertY(cyNorm + distanceNorm * Math.sin(angleRad));
+            const circleRNorm = Math.max(3, 12 - i * 3);
+            ctx.beginPath();
+            ctx.ellipse(circleX, circleY, circleRNorm * scaleX, circleRNorm * scaleY, 0, 0, Math.PI * 2);
+            ctx.fillStyle = bubble.fill;
+            ctx.fill();
+            ctx.strokeStyle = bubble.stroke;
+            ctx.stroke();
+          }
+        } else {
+          // Draw speech bubble (oval with tail as single unified shape)
+          const angleRad = (bubble.tailAngle * Math.PI) / 180;
+          const tailSpread = 12;
+          const angle1 = angleRad - (tailSpread * Math.PI) / 180;
+          const angle2 = angleRad + (tailSpread * Math.PI) / 180;
+          const tailLenNorm = bubble.tailLength * BUBBLE_VIEWBOX_HEIGHT * SPEECH_TAIL_SCALE;
+
+          const base1NormX = cxNorm + rxNorm * Math.cos(angle1);
+          const base1NormY = cyNorm + ryNorm * Math.sin(angle1);
+          const base2NormX = cxNorm + rxNorm * Math.cos(angle2);
+          const base2NormY = cyNorm + ryNorm * Math.sin(angle2);
+          const tipNormX = cxNorm + (rxNorm + tailLenNorm) * Math.cos(angleRad);
+          const tipNormY = cyNorm + (ryNorm + tailLenNorm) * Math.sin(angleRad);
+
+          const base1X = convertX(base1NormX);
+          const base1Y = convertY(base1NormY);
+          const base2X = convertX(base2NormX);
+          const base2Y = convertY(base2NormY);
+          const tipX = convertX(tipNormX);
+          const tipY = convertY(tipNormY);
+          const centerX = convertX(cxNorm);
+          const centerY = convertY(cyNorm);
+          const rxActual = rxNorm * scaleX;
+          const ryActual = ryNorm * scaleY;
+
+          // Draw unified shape: arc from angle1 to angle2 (the long way around), then tail
+          ctx.beginPath();
+          ctx.moveTo(base1X, base1Y);
+          // counterclockwise=true goes the long way from angle1 to angle2
+          ctx.ellipse(centerX, centerY, rxActual, ryActual, 0, angle1, angle2, true);
+          // Draw tail: from base2 to tip, then close back to base1
+          ctx.lineTo(tipX, tipY);
+          ctx.closePath();
+
+          ctx.fillStyle = bubble.fill;
+          ctx.fill();
+          ctx.lineWidth = bubble.strokeWidth * bubbleExportScale;
+          ctx.strokeStyle = bubble.stroke;
+          ctx.lineJoin = "round";
+          ctx.stroke();
+        }
+
+        // Draw bubble text
+        const baseFontSizePx = (bubble.fontSize ?? 0.85) * 16;
+        const bubFontSize = baseFontSizePx * bubbleExportScale;
+        ctx.font = `${bubFontSize}px ${bubble.fontFamily ?? "Comic Sans MS, cursive"}`;
+        ctx.fillStyle = "#000000";
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "center";
+
+        const textPadding = 0.1 * Math.min(bubW, bubH);
+        const maxTextW = bubW - textPadding * 2;
+        const textAreaTop = bubY + bubH * 0.1;
+        const textAreaBottom = bubY + bubH * (0.7 - bubble.tailLength * 0.2);
+        const textAreaHeight = textAreaBottom - textAreaTop;
+
+        // Word wrap
+        const bubbleLines: string[] = [];
+        const paragraphs = bubble.text.split(/\n/);
+        for (const paragraph of paragraphs) {
+          if (paragraph.trim() === "") {
+            bubbleLines.push("");
+            continue;
+          }
+          const words = paragraph.split(/\s+/);
+          let currentLine = "";
+          for (const word of words) {
+            const testLine = currentLine ? `${currentLine} ${word}` : word;
+            const metrics = ctx.measureText(testLine);
+            if (metrics.width > maxTextW && currentLine) {
+              bubbleLines.push(currentLine);
+              currentLine = word;
+            } else {
+              currentLine = testLine;
+            }
+          }
+          if (currentLine) bubbleLines.push(currentLine);
+        }
+
+        const bubLineHeight = bubFontSize * 1.2;
+        const totalTextHeight = bubbleLines.length * bubLineHeight;
+        let bubTextY = textAreaTop + (textAreaHeight - totalTextHeight) / 2 + bubLineHeight / 2;
+        
+        for (const line of bubbleLines) {
+          if (bubTextY > textAreaBottom) break;
+          ctx.fillText(line, bubX + bubW / 2, bubTextY);
+          bubTextY += bubLineHeight;
+        }
+
+        ctx.restore();
+      }
+
       const blob = await new Promise<Blob | null>((resolve) => {
         canvas.toBlob((result) => resolve(result), "image/png", 1);
       });
@@ -4429,6 +4722,22 @@ function PanelsTab({
               <button
                 type="button"
                 className="ghost"
+                onClick={() => handleCreateBubble("speech")}
+                disabled={status === "loading" || status === "saving" || status === "generating" || !page}
+              >
+                Speech Bubble
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => handleCreateBubble("thought")}
+                disabled={status === "loading" || status === "saving" || status === "generating" || !page}
+              >
+                Thought Bubble
+              </button>
+              <button
+                type="button"
+                className="ghost"
                 onClick={() => void handleCreatePage()}
                 disabled={status === "saving" || status === "generating"}
               >
@@ -4710,6 +5019,104 @@ function PanelsTab({
                           pointerStartY: e.clientY,
                           corner: "se",
                           isCaptionBox: true,
+                        };
+                      }} aria-hidden />
+                    </>
+                  )}
+                </div>
+              ))}
+            {/* Speech and thought bubbles */}
+            {page &&
+              status !== "loading" &&
+              (page.bubbles ?? []).map((bubble) => (
+                <div
+                  key={bubble.id}
+                  className={`storyboard-bubble storyboard-bubble-${bubble.type} ${selectedBubbleId === bubble.id ? "is-selected" : ""}`}
+                  style={{
+                    position: "absolute",
+                    left: `${bubble.geometry.x * 100}%`,
+                    top: `${bubble.geometry.y * 100}%`,
+                    width: `${bubble.geometry.width * 100}%`,
+                    height: `${bubble.geometry.height * 100}%`,
+                    zIndex: bubble.order + 150,
+                    cursor: "move",
+                  }}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSelectedBubbleId(bubble.id);
+                    setSelectedPanelId(null);
+                    setSelectedCaptionId(null);
+                    interactionRef.current = {
+                      panelId: bubble.id,
+                      mode: "move",
+                      origin: bubble.geometry,
+                      pointerStartX: e.clientX,
+                      pointerStartY: e.clientY,
+                      isBubble: true,
+                    };
+                  }}
+                >
+                  <SpeechBubble
+                    type={bubble.type}
+                    fill={bubble.fill}
+                    stroke={bubble.stroke}
+                    strokeWidth={bubble.strokeWidth}
+                    tailAngle={bubble.tailAngle}
+                    tailLength={bubble.tailLength}
+                    fontFamily={bubble.fontFamily}
+                    fontSize={bubble.fontSize}
+                  >
+                    <span style={{ whiteSpace: "pre-wrap" }}>{bubble.text}</span>
+                  </SpeechBubble>
+                  {selectedBubbleId === bubble.id && (
+                    <>
+                      <div className="panel-handle handle-nw" onPointerDown={(e) => {
+                        e.stopPropagation();
+                        interactionRef.current = {
+                          panelId: bubble.id,
+                          mode: "resize",
+                          origin: bubble.geometry,
+                          pointerStartX: e.clientX,
+                          pointerStartY: e.clientY,
+                          corner: "nw",
+                          isBubble: true,
+                        };
+                      }} aria-hidden />
+                      <div className="panel-handle handle-ne" onPointerDown={(e) => {
+                        e.stopPropagation();
+                        interactionRef.current = {
+                          panelId: bubble.id,
+                          mode: "resize",
+                          origin: bubble.geometry,
+                          pointerStartX: e.clientX,
+                          pointerStartY: e.clientY,
+                          corner: "ne",
+                          isBubble: true,
+                        };
+                      }} aria-hidden />
+                      <div className="panel-handle handle-sw" onPointerDown={(e) => {
+                        e.stopPropagation();
+                        interactionRef.current = {
+                          panelId: bubble.id,
+                          mode: "resize",
+                          origin: bubble.geometry,
+                          pointerStartX: e.clientX,
+                          pointerStartY: e.clientY,
+                          corner: "sw",
+                          isBubble: true,
+                        };
+                      }} aria-hidden />
+                      <div className="panel-handle handle-se" onPointerDown={(e) => {
+                        e.stopPropagation();
+                        interactionRef.current = {
+                          panelId: bubble.id,
+                          mode: "resize",
+                          origin: bubble.geometry,
+                          pointerStartX: e.clientX,
+                          pointerStartY: e.clientY,
+                          corner: "se",
+                          isBubble: true,
                         };
                       }} aria-hidden />
                     </>
@@ -5335,6 +5742,110 @@ function PanelsTab({
                       onClick={() => handleDeleteCaptionBox(selectedCaption.id)}
                     >
                       Delete Caption
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Bubble Editor */}
+          {selectedBubble && (
+            <div className="field collapsible bubble-editor">
+              <button
+                type="button"
+                className="collapsible-header"
+                onClick={() =>
+                  setCollapsedSections((previous) => ({ ...previous, bubble: !previous.bubble }))
+                }
+              >
+                <span>{selectedBubble.type === "speech" ? "Speech" : "Thought"} Bubble</span>
+                <span aria-hidden="true">{collapsedSections.bubble ? "▸" : "▾"}</span>
+              </button>
+              {!collapsedSections.bubble && (
+                <>
+                  <div className="field">
+                    <label htmlFor="bubble-text">Bubble text</label>
+                    <textarea
+                      id="bubble-text"
+                      rows={3}
+                      value={selectedBubble.text}
+                      onChange={(e) => updateBubble(selectedBubble.id, { text: e.target.value })}
+                      placeholder="Enter bubble text..."
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="bubble-font">Font</label>
+                    <FontSelector
+                      id="bubble-font"
+                      value={selectedBubble.fontFamily ?? "Comic Sans MS, cursive"}
+                      onChange={(font) => updateBubble(selectedBubble.id, { fontFamily: font })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="bubble-font-size">Font size (rem)</label>
+                    <input
+                      id="bubble-font-size"
+                      type="number"
+                      min={0.5}
+                      max={2}
+                      step={0.1}
+                      value={selectedBubble.fontSize ?? 0.85}
+                      onChange={(e) => updateBubble(selectedBubble.id, { fontSize: parseFloat(e.target.value) || 0.85 })}
+                    />
+                  </div>
+                  <div className="field multi compact">
+                    <div className="field">
+                      <label htmlFor="bubble-fill">Fill color</label>
+                      <input
+                        id="bubble-fill"
+                        type="color"
+                        value={selectedBubble.fill}
+                        onChange={(e) => updateBubble(selectedBubble.id, { fill: e.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="bubble-stroke">Stroke color</label>
+                      <input
+                        id="bubble-stroke"
+                        type="color"
+                        value={selectedBubble.stroke}
+                        onChange={(e) => updateBubble(selectedBubble.id, { stroke: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="bubble-tail-angle">Tail direction (degrees)</label>
+                    <input
+                      id="bubble-tail-angle"
+                      type="range"
+                      min={0}
+                      max={360}
+                      step={15}
+                      value={selectedBubble.tailAngle}
+                      onChange={(e) => updateBubble(selectedBubble.id, { tailAngle: parseFloat(e.target.value) })}
+                    />
+                    <span className="helper-text">{selectedBubble.tailAngle}° (0=right, 90=down, 180=left, 270=up)</span>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="bubble-tail-length">Tail length</label>
+                    <input
+                      id="bubble-tail-length"
+                      type="range"
+                      min={0.1}
+                      max={0.5}
+                      step={0.05}
+                      value={selectedBubble.tailLength}
+                      onChange={(e) => updateBubble(selectedBubble.id, { tailLength: parseFloat(e.target.value) })}
+                    />
+                  </div>
+                  <div className="panel-actions">
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => handleDeleteBubble(selectedBubble.id)}
+                    >
+                      Delete Bubble
                     </button>
                   </div>
                 </>

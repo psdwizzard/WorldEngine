@@ -574,6 +574,38 @@ textarea {
   color: rgba(245, 200, 100, 0.95);
 }
 
+.storyboard-bubble {
+  position: absolute;
+  cursor: move;
+  z-index: 150;
+}
+
+.storyboard-bubble.is-selected {
+  outline: 2px solid rgba(100, 200, 255, 0.95);
+  outline-offset: 2px;
+}
+
+.storyboard-bubble .panel-handle {
+  z-index: 151;
+}
+
+.bubble-editor {
+  border-color: rgba(100, 200, 255, 0.3);
+  background: rgba(15, 25, 35, 0.9);
+}
+
+.bubble-editor .collapsible-header {
+  color: rgba(100, 200, 255, 0.95);
+}
+
+.speech-bubble {
+  pointer-events: none;
+}
+
+.speech-bubble > div {
+  pointer-events: auto;
+}
+
 .storyboard-panel-image {
   position: absolute;
   inset: 0;
