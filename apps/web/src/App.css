@@ -545,6 +545,35 @@ textarea {
   box-shadow: 0 0 0 1px rgba(124, 189, 255, 0.7);
 }
 
+.storyboard-caption {
+  position: absolute;
+  cursor: move;
+  z-index: 100;
+}
+
+.storyboard-caption.is-selected {
+  outline: 2px solid rgba(124, 189, 255, 0.95);
+  outline-offset: 2px;
+}
+
+.storyboard-caption .caption-box {
+  width: 100%;
+  height: 100%;
+}
+
+.storyboard-caption .panel-handle {
+  z-index: 101;
+}
+
+.caption-editor {
+  border-color: rgba(245, 200, 100, 0.3);
+  background: rgba(30, 25, 15, 0.9);
+}
+
+.caption-editor .collapsible-header {
+  color: rgba(245, 200, 100, 0.95);
+}
+
 .storyboard-panel-image {
   position: absolute;
   inset: 0;
@@ -1097,4 +1126,54 @@ label.upload.is-disabled {
 
 .library-card-replaced .library-thumb {
   opacity: 0.85;
+}
+
+/* Font Selector */
+.font-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.font-selector-row {
+  display: flex;
+  gap: 0.35rem;
+  align-items: stretch;
+}
+
+.font-selector-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.font-load-btn,
+.font-custom-btn {
+  padding: 0.4rem 0.5rem !important;
+  min-width: 32px;
+  font-size: 0.85rem;
+}
+
+.font-custom-input {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.font-custom-input input {
+  flex: 1;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.font-custom-input button {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.6rem;
+}
+
+.font-preview {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.5rem;
+  background: rgba(245, 245, 240, 0.95);
+  color: #1a1a1a;
+  border-radius: 0.35rem;
+  text-align: center;
 }

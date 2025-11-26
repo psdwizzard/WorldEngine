@@ -1,0 +1,49 @@
+.caption-box {
+  font-family: "Courier New", Courier, monospace;
+  font-weight: 600;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.caption-box-title {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  margin-bottom: 0.25rem;
+  letter-spacing: 0.05em;
+}
+
+.caption-box p {
+  margin: 0;
+}
+
+/* Variant styles */
+.caption-box.dark {
+  --caption-fill: #1a1a1a;
+  --caption-stroke: #000;
+  --caption-text: #f5f5f0;
+}
+
+.caption-box.aged {
+  --caption-fill: #e8e0d0;
+  --caption-stroke: #3a3020;
+}
+
+.caption-box.blood {
+  --caption-fill: #8b0000;
+  --caption-stroke: #2a0000;
+  --caption-text: #f5f5f0;
+}
+
+/* Animation for regeneration */
+@keyframes caption-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+.caption-box.regenerating {
+  animation: caption-shake 0.15s ease-in-out;
+}
+

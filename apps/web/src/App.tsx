@@ -13,6 +13,7 @@ import type {
   PromptPresetSet,
   StoryboardPage,
   StoryboardPanel,
+  StoryboardCaptionBox,
   UUID,
 } from "@worldengine/shared";
 import { PANEL_RENDER_MODEL_LABELS } from "@worldengine/shared";
@@ -47,6 +48,7 @@ import {
   deleteStoryboardPageApi,
   updatePageIssue,
 } from "./lib/api";
+import { CaptionBox, FontSelector } from "./components";
 import "./App.css";
 
 function assetHref(pathOrId: string) {
@@ -64,6 +66,7 @@ function assetHref(pathOrId: string) {
 }
 
 const MIN_PANEL_SIZE = 0.12;
+const MIN_CAPTION_SIZE = 0.03; // Smaller minimum for caption boxes
 
 type ResizeCorner = "nw" | "ne" | "sw" | "se";
 type InteractionMode = "move" | "resize" | "image-pan";
@@ -86,6 +89,8 @@ type InteractionState = {
   imageOffsetY?: number;
   panelWidth?: number;
   panelHeight?: number;
+  /** Whether this interaction is for a caption box (vs a panel). */
+  isCaptionBox?: boolean;
 };
 
 function clampFraction(value: number, min = 0, max = 1) {
@@ -119,27 +124,27 @@ function moveGeometry(origin: PanelGeometry, dx: number, dy: number): PanelGeome
   };
 }
 
-function resizeGeometry(origin: PanelGeometry, dx: number, dy: number, corner: ResizeCorner): PanelGeometry {
+function resizeGeometry(origin: PanelGeometry, dx: number, dy: number, corner: ResizeCorner, minSize = MIN_PANEL_SIZE): PanelGeometry {
   let left = origin.x;
   let top = origin.y;
   let right = origin.x + origin.width;
   let bottom = origin.y + origin.height;
 
   if (corner.includes("w")) {
-    left = clampFraction(left + dx, 0, right - MIN_PANEL_SIZE);
+    left = clampFraction(left + dx, 0, right - minSize);
   }
   if (corner.includes("e")) {
-    right = clampFraction(right + dx, left + MIN_PANEL_SIZE, 1);
+    right = clampFraction(right + dx, left + minSize, 1);
   }
   if (corner.includes("n")) {
-    top = clampFraction(top + dy, 0, bottom - MIN_PANEL_SIZE);
+    top = clampFraction(top + dy, 0, bottom - minSize);
   }
   if (corner.includes("s")) {
-    bottom = clampFraction(bottom + dy, top + MIN_PANEL_SIZE, 1);
+    bottom = clampFraction(bottom + dy, top + minSize, 1);
   }
 
-  const width = clampFraction(right - left, MIN_PANEL_SIZE, 1);
-  const height = clampFraction(bottom - top, MIN_PANEL_SIZE, 1);
+  const width = clampFraction(right - left, minSize, 1);
+  const height = clampFraction(bottom - top, minSize, 1);
 
   left = clampFraction(left, 0, 1 - width);
   top = clampFraction(top, 0, 1 - height);
@@ -2360,6 +2365,7 @@ function PanelsTab({
   const [pages, setPages] = useState<StoryboardPage[]>([]);
   const [allProjectPages, setAllProjectPages] = useState<StoryboardPage[]>([]); // All pages across all issues for library
   const [selectedPanelId, setSelectedPanelId] = useState<UUID | null>(null);
+  const [selectedCaptionId, setSelectedCaptionId] = useState<UUID | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const interactionRef = useRef<InteractionState | null>(null);
@@ -2383,10 +2389,11 @@ function PanelsTab({
   >({});
   const [subTab, setSubTab] = useState<"layout" | "library" | "project-library">("layout");
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
-    references: false,
-    page: false,
-    panel: false,
-    generation: false,
+    references: true,
+    page: true,
+    panel: true,
+    generation: true,
+    caption: true,
   });
   const [renderModelInFlight, setRenderModelInFlight] = useState<PanelRenderModel | null>(null);
   const [updatingPageIssue, setUpdatingPageIssue] = useState(false);
@@ -2575,6 +2582,113 @@ function PanelsTab({
     [updatePanel],
   );
 
+  // Caption box helpers
+  const updateCaptionBox = useCallback(
+    (captionId: UUID, updates: Partial<StoryboardCaptionBox>) => {
+      let didChange = false;
+      setPage((previous) => {
+        if (!previous) return previous;
+        const captionBoxes = previous.captionBoxes ?? [];
+        const captionIndex = captionBoxes.findIndex((c) => c.id === captionId);
+        if (captionIndex === -1) return previous;
+        
+        const caption = captionBoxes[captionIndex];
+        const entries = Object.entries(updates) as Array<[keyof StoryboardCaptionBox, unknown]>;
+        const hasDelta = entries.some(([key, value]) => {
+          if (key === "geometry" && value) {
+            return geometryChanged(caption.geometry, value as PanelGeometry);
+          }
+          return (caption as Record<string, unknown>)[key as string] !== value;
+        });
+
+        if (!hasDelta) return previous;
+
+        didChange = true;
+        const updatedCaption: StoryboardCaptionBox = {
+          ...caption,
+          ...updates,
+          updatedAt: new Date().toISOString(),
+        };
+
+        const newCaptionBoxes = [...captionBoxes];
+        newCaptionBoxes.splice(captionIndex, 1, updatedCaption);
+
+        return {
+          ...previous,
+          captionBoxes: newCaptionBoxes,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+
+      if (didChange) {
+        markDirty();
+      }
+    },
+    [markDirty],
+  );
+
+  const handleCreateCaptionBox = useCallback(() => {
+    if (!page) return;
+    
+    const now = new Date().toISOString();
+    const newCaption: StoryboardCaptionBox = {
+      id: crypto.randomUUID() as UUID,
+      geometry: { x: 0.05, y: 0.05, width: 0.25, height: 0.08 },
+      text: "Caption text...",
+      fontFamily: "Courier New",
+      fontSize: 0.7,
+      fill: "#f5f5f0",
+      stroke: "#1a1a1a",
+      strokeWidth: 2,
+      shadowOffset: 3,
+      shadowColor: "#1a1a1a",
+      roughness: 0.7,
+      seed: Math.floor(Math.random() * 10000),
+      order: (page.captionBoxes?.length ?? 0) + 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    setPage((previous) => {
+      if (!previous) return previous;
+      return {
+        ...previous,
+        captionBoxes: [...(previous.captionBoxes ?? []), newCaption],
+        updatedAt: now,
+      };
+    });
+
+    setSelectedCaptionId(newCaption.id);
+    setSelectedPanelId(null);
+    markDirty();
+  }, [page, markDirty]);
+
+  const handleDeleteCaptionBox = useCallback(
+    (captionId: UUID) => {
+      setPage((previous) => {
+        if (!previous) return previous;
+        const captionBoxes = previous.captionBoxes ?? [];
+        const filtered = captionBoxes.filter((c) => c.id !== captionId);
+        if (filtered.length === captionBoxes.length) return previous;
+        return {
+          ...previous,
+          captionBoxes: filtered,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+      if (selectedCaptionId === captionId) {
+        setSelectedCaptionId(null);
+      }
+      markDirty();
+    },
+    [selectedCaptionId, markDirty],
+  );
+
+  const selectedCaption = useMemo(() => {
+    if (!page || !selectedCaptionId) return null;
+    return page.captionBoxes?.find((c) => c.id === selectedCaptionId) ?? null;
+  }, [page, selectedCaptionId]);
+
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
       const interaction = interactionRef.current;
@@ -2590,10 +2704,19 @@ function PanelsTab({
 
       if (interaction.mode === "move") {
         const nextGeometry = moveGeometry(interaction.origin, dx, dy);
-        updateGeometry(interaction.panelId, nextGeometry);
+        if (interaction.isCaptionBox) {
+          updateCaptionBox(interaction.panelId, { geometry: nextGeometry });
+        } else {
+          updateGeometry(interaction.panelId, nextGeometry);
+        }
       } else if (interaction.mode === "resize" && interaction.corner) {
-        const nextGeometry = resizeGeometry(interaction.origin, dx, dy, interaction.corner);
-        updateGeometry(interaction.panelId, nextGeometry);
+        const minSize = interaction.isCaptionBox ? MIN_CAPTION_SIZE : MIN_PANEL_SIZE;
+        const nextGeometry = resizeGeometry(interaction.origin, dx, dy, interaction.corner, minSize);
+        if (interaction.isCaptionBox) {
+          updateCaptionBox(interaction.panelId, { geometry: nextGeometry });
+        } else {
+          updateGeometry(interaction.panelId, nextGeometry);
+        }
       } else if (interaction.mode === "image-pan") {
         const panelWidth = interaction.panelWidth || bounds.width;
         const panelHeight = interaction.panelHeight || bounds.height;
@@ -2622,7 +2745,7 @@ function PanelsTab({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [updateGeometry]);
+  }, [updateGeometry, updateCaptionBox]);
 
   useEffect(() => {
     if (!page || !selectedPanelId) return;
@@ -3534,6 +3657,12 @@ function PanelsTab({
       ctx.fillStyle = page.backgroundColor ?? "#ffffff";
       ctx.fillRect(0, 0, width, height);
 
+      const displayCanvas = canvasRef.current;
+      const displayWidth = displayCanvas?.clientWidth ?? width;
+      const displayHeight = displayCanvas?.clientHeight ?? height;
+      const exportScaleX = displayWidth > 0 ? width / displayWidth : 1;
+      const exportScaleY = displayHeight > 0 ? height / displayHeight : 1;
+
       const panelsWithImage = page.panels.filter((panel) => panel.renderAssetId);
 
       for (const panel of panelsWithImage) {
@@ -3641,6 +3770,155 @@ function PanelsTab({
           ctx.stroke();
           ctx.restore();
         }
+      }
+
+      // Draw caption boxes
+      const captionBoxes = page.captionBoxes ?? [];
+      for (const caption of captionBoxes) {
+        const capX = caption.geometry.x * width;
+        const capY = caption.geometry.y * height;
+        const capW = caption.geometry.width * width;
+        const capH = caption.geometry.height * height;
+
+        // Generate rough edge points
+        const seededRandom = (seed: number) => {
+          const x = Math.sin(seed) * 10000;
+          return x - Math.floor(x);
+        };
+
+        const generateRoughPoints = (
+          startX: number, startY: number, endX: number, endY: number,
+          segments: number, roughness: number, seed: number, isHorizontal: boolean,
+          scale: number
+        ): Array<{ x: number; y: number }> => {
+          const points: Array<{ x: number; y: number }> = [];
+          const dx = (endX - startX) / segments;
+          const dy = (endY - startY) / segments;
+          const perpX = isHorizontal ? 0 : 1;
+          const perpY = isHorizontal ? 1 : 0;
+          const maxOffset = 2.5 * roughness * scale;
+
+          for (let i = 0; i <= segments; i++) {
+            const baseX = startX + dx * i;
+            const baseY = startY + dy * i;
+            const edgeFactor = i === 0 || i === segments ? 0.2 : 1;
+            const offsetSeed = seed + i * 137.5 + (isHorizontal ? 0 : 1000);
+            const randomOffset = (seededRandom(offsetSeed) - 0.5) * 2 * maxOffset * edgeFactor;
+            const tearSeed = seed + i * 73.1 + (isHorizontal ? 2000 : 3000);
+            const hasTear = seededRandom(tearSeed) > 0.92;
+            const tearAmount = hasTear ? (seededRandom(tearSeed + 1) - 0.5) * maxOffset * 2.5 : 0;
+            points.push({
+              x: baseX + perpX * (randomOffset + tearAmount),
+              y: baseY + perpY * (randomOffset + tearAmount),
+            });
+          }
+          return points;
+        };
+
+        const edgeDetail = 24;
+        const roughness = caption.roughness ?? 0.7;
+        const seed = caption.seed ?? 0;
+
+        // No internal padding - use full caption box dimensions
+        const left = capX;
+        const top = capY;
+        const right = capX + capW;
+        const bottom = capY + capH;
+
+        // Scale everything based on how much the export canvas differs from the on-screen canvas
+        const exportScale = exportScaleX;
+        
+        const topEdge = generateRoughPoints(left, top, right, top, edgeDetail, roughness, seed, true, exportScale);
+        const rightEdge = generateRoughPoints(right, top, right, bottom, edgeDetail, roughness, seed + 100, false, exportScale);
+        const bottomEdge = generateRoughPoints(right, bottom, left, bottom, edgeDetail, roughness, seed + 200, true, exportScale);
+        const leftEdge = generateRoughPoints(left, bottom, left, top, edgeDetail, roughness, seed + 300, false, exportScale);
+
+        const allPoints = [...topEdge, ...rightEdge.slice(1), ...bottomEdge.slice(1), ...leftEdge.slice(1)];
+
+        const scaledShadowOffset = (caption.shadowOffset ?? 3) * exportScale;
+
+        // Draw shadow
+        if (scaledShadowOffset > 0) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(allPoints[0].x + scaledShadowOffset, allPoints[0].y + scaledShadowOffset);
+          for (let i = 1; i < allPoints.length; i++) {
+            ctx.lineTo(allPoints[i].x + scaledShadowOffset, allPoints[i].y + scaledShadowOffset);
+          }
+          ctx.closePath();
+          ctx.fillStyle = caption.shadowColor ?? "#1a1a1a";
+          ctx.globalAlpha = 0.9;
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // Draw main box
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(allPoints[0].x, allPoints[0].y);
+        for (let i = 1; i < allPoints.length; i++) {
+          ctx.lineTo(allPoints[i].x, allPoints[i].y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = caption.fill ?? "#f5f5f0";
+        ctx.fill();
+        if (caption.strokeWidth > 0) {
+          ctx.lineWidth = caption.strokeWidth * exportScale;
+          ctx.strokeStyle = caption.stroke ?? "#1a1a1a";
+          ctx.lineJoin = "round";
+          ctx.stroke();
+        }
+        ctx.restore();
+
+        // Draw text (match on-screen appearance exactly)
+        ctx.save();
+        const baseFontSizePx = (caption.fontSize ?? 0.7) * 16; // rem -> px
+        const fontSize = baseFontSizePx * exportScale;
+        ctx.font = `${fontSize}px ${caption.fontFamily ?? "Courier New"}`;
+        ctx.fillStyle = "#1a1a1a";
+        ctx.textBaseline = "top";
+
+        const textPaddingX = 0.6 * 16 * exportScale; // 0.6rem horizontal padding
+        const textPaddingY = 0.5 * 16 * exportScale; // 0.5rem vertical padding
+        const maxTextWidth = Math.max(1, capW - textPaddingX * 2);
+        const maxTextHeight = Math.max(1, capH - textPaddingY * 2);
+        
+        // Simple text wrapping
+        const lines: string[] = [];
+        const paragraphs = caption.text.split(/\n/);
+        
+        for (const paragraph of paragraphs) {
+          if (paragraph.trim() === "") {
+            lines.push("");
+            continue;
+          }
+          const words = paragraph.split(/\s+/);
+          let currentLine = "";
+
+          for (const word of words) {
+            const testLine = currentLine ? `${currentLine} ${word}` : word;
+            const metrics = ctx.measureText(testLine);
+            if (metrics.width > maxTextWidth && currentLine) {
+              lines.push(currentLine);
+              currentLine = word;
+            } else {
+              currentLine = testLine;
+            }
+          }
+          if (currentLine) lines.push(currentLine);
+        }
+
+        const lineHeight = fontSize * 1.3;
+        const maxY = capY + textPaddingY + maxTextHeight;
+        let textY = capY + textPaddingY;
+        for (const line of lines) {
+          if (textY > maxY) break;
+          const remainingHeight = maxY - textY;
+          if (remainingHeight < lineHeight * 0.35) break; // avoid clipping tiny slivers
+          ctx.fillText(line, capX + textPaddingX, textY, maxTextWidth);
+          textY += lineHeight;
+        }
+        ctx.restore();
       }
 
       const blob = await new Promise<Blob | null>((resolve) => {
@@ -4143,6 +4421,14 @@ function PanelsTab({
               <button
                 type="button"
                 className="ghost"
+                onClick={handleCreateCaptionBox}
+                disabled={status === "loading" || status === "saving" || status === "generating" || !page}
+              >
+                Add Caption
+              </button>
+              <button
+                type="button"
+                className="ghost"
                 onClick={() => void handleCreatePage()}
                 disabled={status === "saving" || status === "generating"}
               >
@@ -4325,6 +4611,111 @@ function PanelsTab({
                 </div>
               );})
             }
+            {/* Caption boxes */}
+            {page &&
+              status !== "loading" &&
+              (page.captionBoxes ?? []).map((caption) => (
+                <div
+                  key={caption.id}
+                  className={`storyboard-caption ${selectedCaptionId === caption.id ? "is-selected" : ""}`}
+                  style={{
+                    position: "absolute",
+                    left: `${caption.geometry.x * 100}%`,
+                    top: `${caption.geometry.y * 100}%`,
+                    width: `${caption.geometry.width * 100}%`,
+                    height: `${caption.geometry.height * 100}%`,
+                    zIndex: caption.order + 100,
+                    cursor: "move",
+                  }}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSelectedCaptionId(caption.id);
+                    setSelectedPanelId(null);
+                    // Start drag
+                    interactionRef.current = {
+                      panelId: caption.id,
+                      mode: "move",
+                      origin: caption.geometry,
+                      pointerStartX: e.clientX,
+                      pointerStartY: e.clientY,
+                      isCaptionBox: true,
+                    };
+                  }}
+                  onDoubleClick={() => {
+                    // Regenerate edges
+                    updateCaptionBox(caption.id, { seed: Math.floor(Math.random() * 10000) });
+                  }}
+                >
+                  <CaptionBox
+                    fill={caption.fill}
+                    stroke={caption.stroke}
+                    strokeWidth={caption.strokeWidth}
+                    shadowOffset={caption.shadowOffset}
+                    shadowColor={caption.shadowColor}
+                    roughness={caption.roughness}
+                    seed={caption.seed}
+                    fontFamily={caption.fontFamily}
+                    fontSize={caption.fontSize}
+                    minWidth={30}
+                    minHeight={20}
+                  >
+                    <span style={{ whiteSpace: "pre-wrap" }}>{caption.text}</span>
+                  </CaptionBox>
+                  {selectedCaptionId === caption.id && (
+                    <>
+                      <div className="panel-handle handle-nw" onPointerDown={(e) => {
+                        e.stopPropagation();
+                        interactionRef.current = {
+                          panelId: caption.id,
+                          mode: "resize",
+                          origin: caption.geometry,
+                          pointerStartX: e.clientX,
+                          pointerStartY: e.clientY,
+                          corner: "nw",
+                          isCaptionBox: true,
+                        };
+                      }} aria-hidden />
+                      <div className="panel-handle handle-ne" onPointerDown={(e) => {
+                        e.stopPropagation();
+                        interactionRef.current = {
+                          panelId: caption.id,
+                          mode: "resize",
+                          origin: caption.geometry,
+                          pointerStartX: e.clientX,
+                          pointerStartY: e.clientY,
+                          corner: "ne",
+                          isCaptionBox: true,
+                        };
+                      }} aria-hidden />
+                      <div className="panel-handle handle-sw" onPointerDown={(e) => {
+                        e.stopPropagation();
+                        interactionRef.current = {
+                          panelId: caption.id,
+                          mode: "resize",
+                          origin: caption.geometry,
+                          pointerStartX: e.clientX,
+                          pointerStartY: e.clientY,
+                          corner: "sw",
+                          isCaptionBox: true,
+                        };
+                      }} aria-hidden />
+                      <div className="panel-handle handle-se" onPointerDown={(e) => {
+                        e.stopPropagation();
+                        interactionRef.current = {
+                          panelId: caption.id,
+                          mode: "resize",
+                          origin: caption.geometry,
+                          pointerStartX: e.clientX,
+                          pointerStartY: e.clientY,
+                          corner: "se",
+                          isCaptionBox: true,
+                        };
+                      }} aria-hidden />
+                    </>
+                  )}
+                </div>
+              ))}
           </div>
         </div>
         <form className="storyboard-form" onSubmit={(event) => event.preventDefault()}>
@@ -4829,6 +5220,128 @@ function PanelsTab({
           ) : (
             <p className="helper-text">Select a panel on the canvas or from the list to edit its metadata.</p>
           )}
+
+          {/* Caption Box Editor */}
+          {selectedCaption && (
+            <div className="field collapsible caption-editor">
+              <button
+                type="button"
+                className="collapsible-header"
+                onClick={() =>
+                  setCollapsedSections((previous) => ({ ...previous, caption: !previous.caption }))
+                }
+              >
+                <span>Caption Box</span>
+                <span aria-hidden="true">{collapsedSections.caption ? "▸" : "▾"}</span>
+              </button>
+              {!collapsedSections.caption && (
+                <>
+                  <div className="field">
+                    <label htmlFor="caption-text">Caption text</label>
+                    <textarea
+                      id="caption-text"
+                      rows={3}
+                      value={selectedCaption.text}
+                      onChange={(e) => updateCaptionBox(selectedCaption.id, { text: e.target.value })}
+                      placeholder="Enter caption text..."
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="caption-font">Font</label>
+                    <FontSelector
+                      id="caption-font"
+                      value={selectedCaption.fontFamily ?? "Courier New"}
+                      onChange={(font) => updateCaptionBox(selectedCaption.id, { fontFamily: font })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="caption-font-size">Font size (rem)</label>
+                    <input
+                      id="caption-font-size"
+                      type="number"
+                      min={0.4}
+                      max={2}
+                      step={0.1}
+                      value={selectedCaption.fontSize ?? 0.7}
+                      onChange={(e) => updateCaptionBox(selectedCaption.id, { fontSize: parseFloat(e.target.value) || 0.7 })}
+                    />
+                  </div>
+                  <div className="field multi compact">
+                    <div className="field">
+                      <label htmlFor="caption-fill">Fill color</label>
+                      <input
+                        id="caption-fill"
+                        type="color"
+                        value={selectedCaption.fill}
+                        onChange={(e) => updateCaptionBox(selectedCaption.id, { fill: e.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="caption-stroke">Stroke color</label>
+                      <input
+                        id="caption-stroke"
+                        type="color"
+                        value={selectedCaption.stroke}
+                        onChange={(e) => updateCaptionBox(selectedCaption.id, { stroke: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className="field multi compact">
+                    <div className="field">
+                      <label htmlFor="caption-shadow">Shadow color</label>
+                      <input
+                        id="caption-shadow"
+                        type="color"
+                        value={selectedCaption.shadowColor}
+                        onChange={(e) => updateCaptionBox(selectedCaption.id, { shadowColor: e.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="caption-stroke-width">Stroke width</label>
+                      <input
+                        id="caption-stroke-width"
+                        type="number"
+                        min={0}
+                        max={10}
+                        value={selectedCaption.strokeWidth}
+                        onChange={(e) => updateCaptionBox(selectedCaption.id, { strokeWidth: parseFloat(e.target.value) || 2 })}
+                      />
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="caption-roughness">Edge roughness</label>
+                    <input
+                      id="caption-roughness"
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.1}
+                      value={selectedCaption.roughness}
+                      onChange={(e) => updateCaptionBox(selectedCaption.id, { roughness: parseFloat(e.target.value) })}
+                    />
+                    <p className="helper-text">Double-click the caption on canvas to regenerate edges.</p>
+                  </div>
+                  <div className="panel-actions">
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => updateCaptionBox(selectedCaption.id, { seed: Math.floor(Math.random() * 10000) })}
+                    >
+                      Regenerate Edges
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => handleDeleteCaptionBox(selectedCaption.id)}
+                    >
+                      Delete Caption
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {error && status === "error" && (
             <p className="form-error" role="alert">
               {error}

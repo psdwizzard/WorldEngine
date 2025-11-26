@@ -125,12 +125,45 @@ export interface StoryboardPanel extends PanelPrompt {
   geometry: PanelGeometry;
 }
 
+/** A caption/info box with rough comic-style edges. */
+export interface StoryboardCaptionBox {
+  id: UUID;
+  /** Position and size on the canvas (0-1 fractions). */
+  geometry: PanelGeometry;
+  /** Text content of the caption. */
+  text: string;
+  /** Font family for the caption text. */
+  fontFamily?: string;
+  /** Font size in rem units. */
+  fontSize?: number;
+  /** Background fill color. */
+  fill: string;
+  /** Border stroke color. */
+  stroke: string;
+  /** Border stroke width in pixels. */
+  strokeWidth: number;
+  /** Shadow offset in pixels. */
+  shadowOffset: number;
+  /** Shadow color. */
+  shadowColor: string;
+  /** Roughness of edges (0-1). */
+  roughness: number;
+  /** Seed for edge randomization. */
+  seed: number;
+  /** Z-index order (higher = on top). */
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StoryboardPage {
   id: UUID;
   label: string;
   width: number;
   height: number;
   panels: StoryboardPanel[];
+  /** Caption boxes on this page. */
+  captionBoxes?: StoryboardCaptionBox[];
   /** Optional background color for the page (CSS color string). */
   backgroundColor?: string;
   /** Issue label this page belongs to (for multi-issue projects). */

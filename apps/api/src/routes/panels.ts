@@ -65,6 +65,24 @@ const storyboardPanelSchema = z.object({
   updatedAt: z.string(),
 });
 
+const captionBoxSchema = z.object({
+  id: z.string().uuid(),
+  geometry: geometrySchema,
+  text: z.string(),
+  fontFamily: z.string().optional(),
+  fontSize: z.number().finite().positive().optional(),
+  fill: z.string(),
+  stroke: z.string(),
+  strokeWidth: z.number().finite().min(0),
+  shadowOffset: z.number().finite().min(0),
+  shadowColor: z.string(),
+  roughness: z.number().finite().min(0).max(1),
+  seed: z.number().finite(),
+  order: z.number().int().nonnegative(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 const storyboardPageSchema = z.object({
   id: z.string().uuid(),
   label: z.string().min(1),
@@ -73,6 +91,7 @@ const storyboardPageSchema = z.object({
   backgroundColor: z.string().optional(),
   issueLabel: z.string().optional(),
   panels: z.array(storyboardPanelSchema),
+  captionBoxes: z.array(captionBoxSchema).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

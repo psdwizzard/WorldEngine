@@ -268,6 +268,8 @@ export async function saveStoryboardPage(projectSlug: string, page: StoryboardPa
     backgroundColor: page.backgroundColor ?? existingPage?.backgroundColor,
     issueLabel: page.issueLabel ?? existingPage?.issueLabel,
     panels,
+    // Preserve caption boxes
+    captionBoxes: page.captionBoxes ?? existingPage?.captionBoxes,
     createdAt: existingPage?.createdAt ?? page.createdAt ?? now(),
     updatedAt: now(),
   };
