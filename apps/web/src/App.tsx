@@ -230,8 +230,43 @@ const GENERATABLE_CHARACTER_ANGLES: CharacterAngle[] = ["left", "right", "back"]
 
 const itemAngles: ReadonlyArray<ItemAngle> = ["primary", "alternate"];
 
+const PANEL_RENDER_SIZE_OPTIONS = [
+  { id: "square", label: "Square (1024 x 1024)", width: 1024, height: 1024, orientations: ["horizontal", "vertical"] },
+  { id: "widescreen", label: "16:9 (1536 x 864)", width: 1536, height: 864, orientations: ["horizontal"] },
+  { id: "landscape_3_2", label: "3:2 (1536 x 1024)", width: 1536, height: 1024, orientations: ["horizontal"] },
+  { id: "portrait_9_16", label: "9:16 (864 x 1536)", width: 864, height: 1536, orientations: ["vertical"] },
+  { id: "portrait", label: "2:3 (1024 x 1536)", width: 1024, height: 1536, orientations: ["vertical"] },
+] as const satisfies ReadonlyArray<{
+  id: string;
+  label: string;
+  width: number;
+  height: number;
+  orientations: PanelOrientation[];
+}>;
+
+type PanelRenderSizeId = (typeof PANEL_RENDER_SIZE_OPTIONS)[number]["id"];
+
 type CharacterView = CharacterPayload;
 type CharacterSlot = CharacterTurnaroundSlot & { angle: CharacterAngle | null };
+
+type StoryboardCharacterReference = {
+  id: UUID;
+  characterId: UUID;
+  slotId?: UUID;
+};
+
+type StoryboardLocationReference = {
+  id: UUID;
+  locationId: UUID;
+  spotId?: UUID | "primary";
+};
+
+type StoryboardItemReferenceEntry = {
+  id: UUID;
+  itemId: UUID;
+};
+
+type PanelOrientation = "horizontal" | "vertical";
 
 function slugifyCharacterName(value: string) {
   const normalized = value
@@ -2391,7 +2426,10 @@ function PanelsTab({
     locationId: undefined,
     spotId: undefined,
   });
-  const [selectedItemIds, setSelectedItemIds] = useState<UUID[]>([]);
+  const [characterReferences, setCharacterReferences] = useState<StoryboardCharacterReference[]>([]);
+  const [locationReferences, setLocationReferences] = useState<StoryboardLocationReference[]>([]);
+  const [itemReferences, setItemReferences] = useState<StoryboardItemReferenceEntry[]>([]);
+  const [pendingItemId, setPendingItemId] = useState<UUID | "">("");
   const [autoPrompt, setAutoPrompt] = useState<string>("");
   const [editingPanelId, setEditingPanelId] = useState<UUID | null>(null);
   const [panelLibraryUploading, setPanelLibraryUploading] = useState<Record<UUID, boolean>>({});
@@ -2411,6 +2449,20 @@ function PanelsTab({
   const [updatingPageIssue, setUpdatingPageIssue] = useState(false);
   // Track which history index each panel is viewing (undefined = latest/current)
   const [panelHistoryIndex, setPanelHistoryIndex] = useState<Record<UUID, number>>({});
+  const [renderOrientation, setRenderOrientation] = useState<PanelOrientation>("horizontal");
+  const [renderSizeId, setRenderSizeId] = useState<PanelRenderSizeId>("square");
+  const renderSizeOptionsForOrientation = useMemo(
+    () => PANEL_RENDER_SIZE_OPTIONS.filter((option) => option.orientations.includes(renderOrientation)),
+    [renderOrientation],
+  );
+
+  useEffect(() => {
+    if (renderSizeOptionsForOrientation.some((option) => option.id === renderSizeId)) {
+      return;
+    }
+    const fallback = renderSizeOptionsForOrientation[0]?.id ?? PANEL_RENDER_SIZE_OPTIONS[0].id;
+    setRenderSizeId(fallback as PanelRenderSizeId);
+  }, [renderOrientation, renderSizeId, renderSizeOptionsForOrientation]);
 
   // Get available issues from all project pages + custom issues
   const availableIssues = useMemo(() => {
@@ -2983,52 +3035,66 @@ function PanelsTab({
   }, [selectedPanel, getPanelHistory, panelHistoryIndex]);
 
   useEffect(() => {
-    const character =
-      characterSelection.characterId && characters.find((candidate) => candidate.id === characterSelection.characterId);
-    const characterSlot =
-      character && character.slots?.find((slot) => slot.id === characterSelection.slotId) && character.slots
-        ? character.slots.find((slot) => slot.id === characterSelection.slotId)
-        : undefined;
-
-    const location =
-      locationSelection.locationId &&
-      locations.find((candidate) => candidate.id === locationSelection.locationId);
-    let locationLabel: string | undefined;
-    if (location) {
-      if (locationSelection.spotId === "primary") {
-        locationLabel = location.name;
-      } else if (locationSelection.spotId) {
-        const spot = location.spots.find((candidate) => candidate.id === locationSelection.spotId);
-        if (spot) {
-          locationLabel = `${location.name} - ${spot.label}`;
+    const characterTokens = characterReferences
+      .map((reference) => {
+        const character = characters.find((candidate) => candidate.id === reference.characterId);
+        if (!character) {
+          return null;
         }
-      }
-    }
+        if (reference.slotId) {
+          const slot = character.slots?.find((entry) => entry.id === reference.slotId);
+          if (slot) {
+            return `[${slot.label}]`;
+          }
+        }
+        return `[${character.name}]`;
+      })
+      .filter((token): token is string => Boolean(token));
 
-    const selectedItems = items.filter((item) => selectedItemIds.includes(item.id));
+    const locationTokens = locationReferences
+      .map((reference) => {
+        const location = locations.find((candidate) => candidate.id === reference.locationId);
+        if (!location) {
+          return null;
+        }
+        if (!reference.spotId || reference.spotId === "primary") {
+          return `[${location.name}]`;
+        }
+        const spot = location.spots?.find((candidate) => candidate.id === reference.spotId);
+        if (spot) {
+          return `[${location.name} - ${spot.label}]`;
+        }
+        return `[${location.name}]`;
+      })
+      .filter((token): token is string => Boolean(token));
+
+    const itemTokens = itemReferences
+      .map((reference) => {
+        const item = items.find((candidate) => candidate.id === reference.itemId);
+        return item ? `[${item.label}]` : null;
+      })
+      .filter((token): token is string => Boolean(token));
 
     const parts: string[] = [];
 
-    if (characterSlot) {
-      parts.push(`[${characterSlot.label}]`);
+    if (characterTokens.length > 0) {
+      parts.push(characterTokens.join(", "));
     }
 
-    if (locationLabel) {
-      if (parts.length > 0) {
-        parts.push(`is in the [${locationLabel}]`);
-      } else {
-        parts.push(`[${locationLabel}]`);
-      }
+    if (locationTokens.length > 0) {
+      const prefix = characterTokens.length > 0 ? "in " : "";
+      parts.push(`${prefix}${locationTokens.join(", ")}`);
     }
 
-    if (selectedItems.length > 0) {
-      const itemTokens = selectedItems.map((item) => `[${item.label}]`).join(", ");
-      parts.push(`with ${itemTokens}`);
+    if (itemTokens.length > 0) {
+      parts.push(`with ${itemTokens.join(", ")}`);
     }
 
-    let composed = parts.join(" ");
-    if (composed.length > 0) {
+    let composed = parts.join(" ").trim();
+    if (composed.length > 0 && !composed.endsWith(".")) {
       composed = `${composed}.`;
+    } else if (composed.length === 0) {
+      composed = "";
     }
 
     setAutoPrompt(composed);
@@ -3043,12 +3109,12 @@ function PanelsTab({
       }
     }
   }, [
-    characterSelection,
+    characterReferences,
     characters,
+    itemReferences,
     items,
-    locationSelection,
+    locationReferences,
     locations,
-    selectedItemIds,
     selectedPanel,
     updatePanel,
   ]);
@@ -3510,10 +3576,148 @@ function PanelsTab({
     }));
   }, []);
 
-  const handleItemSelectionChange = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
-    const options = Array.from(event.target.selectedOptions);
-    setSelectedItemIds(options.map((option) => option.value as UUID));
+  const handleAddCharacterReference = useCallback(() => {
+    if (!characterSelection.characterId) {
+      return;
+    }
+    setCharacterReferences((previous) => {
+      const duplicate = previous.some(
+        (entry) =>
+          entry.characterId === characterSelection.characterId &&
+          (entry.slotId ?? null) === (characterSelection.slotId ?? null),
+      );
+      if (duplicate) {
+        return previous;
+      }
+      return [
+        ...previous,
+        {
+          id: crypto.randomUUID() as UUID,
+          characterId: characterSelection.characterId as UUID,
+          slotId: characterSelection.slotId,
+        },
+      ];
+    });
+    setCharacterSelection((previous) => ({
+      characterId: previous.characterId,
+      slotId: undefined,
+    }));
+  }, [characterSelection]);
+
+  const handleRemoveCharacterReference = useCallback((referenceId: UUID) => {
+    setCharacterReferences((previous) => previous.filter((reference) => reference.id !== referenceId));
   }, []);
+
+  const handleAddLocationReference = useCallback(() => {
+    if (!locationSelection.locationId) {
+      return;
+    }
+    setLocationReferences((previous) => {
+      const duplicate = previous.some(
+        (entry) =>
+          entry.locationId === locationSelection.locationId &&
+          (entry.spotId ?? null) === (locationSelection.spotId ?? null),
+      );
+      if (duplicate) {
+        return previous;
+      }
+      return [
+        ...previous,
+        {
+          id: crypto.randomUUID() as UUID,
+          locationId: locationSelection.locationId as UUID,
+          spotId: locationSelection.spotId,
+        },
+      ];
+    });
+    setLocationSelection((previous) => ({
+      locationId: previous.locationId,
+      spotId: undefined,
+    }));
+  }, [locationSelection]);
+
+  const handleRemoveLocationReference = useCallback((referenceId: UUID) => {
+    setLocationReferences((previous) => previous.filter((reference) => reference.id !== referenceId));
+  }, []);
+
+  const handlePendingItemChange = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
+    setPendingItemId(event.target.value as UUID | "");
+  }, []);
+
+  const handleAddItemReference = useCallback(() => {
+    if (!pendingItemId) {
+      return;
+    }
+    setItemReferences((previous) => {
+      const duplicate = previous.some((entry) => entry.itemId === pendingItemId);
+      if (duplicate) {
+        return previous;
+      }
+      return [
+        ...previous,
+        {
+          id: crypto.randomUUID() as UUID,
+          itemId: pendingItemId,
+        },
+      ];
+    });
+    setPendingItemId("");
+  }, [pendingItemId]);
+
+  const handleRemoveItemReference = useCallback((referenceId: UUID) => {
+    setItemReferences((previous) => previous.filter((reference) => reference.id !== referenceId));
+  }, []);
+
+  const handleRenderSizeChange = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
+    setRenderSizeId(event.target.value as PanelRenderSizeId);
+  }, []);
+
+  const handleRenderOrientationChange = useCallback((orientation: PanelOrientation) => {
+    setRenderOrientation(orientation);
+  }, []);
+
+  const resolveCharacterReferenceLabel = useCallback(
+    (reference: StoryboardCharacterReference): string => {
+      const character = characters.find((candidate) => candidate.id === reference.characterId);
+      if (!character) {
+        return "Unknown character";
+      }
+      if (reference.slotId) {
+        const slot = character.slots?.find((entry) => entry.id === reference.slotId);
+        if (slot) {
+          return `${character.name} - ${slot.label}`;
+        }
+      }
+      return `${character.name} (Any view)`;
+    },
+    [characters],
+  );
+
+  const resolveLocationReferenceLabel = useCallback(
+    (reference: StoryboardLocationReference): string => {
+      const location = locations.find((candidate) => candidate.id === reference.locationId);
+      if (!location) {
+        return "Unknown location";
+      }
+      if (!reference.spotId || reference.spotId === "primary") {
+        return `${location.name}${reference.spotId === "primary" ? " - Primary" : ""}`;
+      }
+      const spot = location.spots?.find((entry) => entry.id === reference.spotId);
+      if (spot) {
+        return `${location.name} - ${spot.label}`;
+      }
+      return location.name;
+    },
+    [locations],
+  );
+
+  const resolveItemReferenceLabel = useCallback(
+    (reference: StoryboardItemReferenceEntry): string => {
+      const item = items.find((candidate) => candidate.id === reference.itemId);
+      return item?.label ?? "Unknown item";
+    },
+    [items],
+  );
 
   const handleCreatePanel = useCallback(async () => {
     setStatus("saving");
@@ -4240,26 +4444,83 @@ function PanelsTab({
       return;
     }
 
-    // Collect reference images for image-to-image:
-    // prefer the selected character slot; also include the selected location view if present.
-    let primaryReferenceAssetId: UUID | undefined;
+    const renderSize =
+      PANEL_RENDER_SIZE_OPTIONS.find((option) => option.id === renderSizeId) ?? PANEL_RENDER_SIZE_OPTIONS[0];
+
     const referenceAssetIds: UUID[] = [];
+    let primaryReferenceAssetId: UUID | undefined;
+    const addReferenceAsset = (assetId?: UUID | null) => {
+      if (!assetId) {
+        return;
+      }
+      if (!referenceAssetIds.includes(assetId)) {
+        referenceAssetIds.push(assetId);
+      }
+      if (!primaryReferenceAssetId) {
+        primaryReferenceAssetId = assetId;
+      }
+    };
 
-    const selectedCharacter =
-      characterSelection.characterId &&
-      characters.find((candidate) => candidate.id === characterSelection.characterId);
-    const selectedSlot =
-      selectedCharacter && selectedCharacter.slots
-        ? selectedCharacter.slots.find((slot) => slot.id === characterSelection.slotId) ??
-          selectedCharacter.slots.find((slot) => slot.asset)
-        : undefined;
+    // Gather character reference images
+    characterReferences.forEach((reference) => {
+      const character = characters.find((candidate) => candidate.id === reference.characterId);
+      if (!character) {
+        return;
+      }
+      const slot = reference.slotId
+        ? character.slots?.find((entry) => entry.id === reference.slotId)
+        : character.slots?.find((entry) => entry.asset);
+      addReferenceAsset(slot?.asset?.id as UUID | undefined);
+    });
 
-    if (selectedSlot?.asset?.id) {
-      primaryReferenceAssetId = selectedSlot.asset.id as UUID;
-      referenceAssetIds.push(selectedSlot.asset.id as UUID);
+    // Gather location reference images
+    locationReferences.forEach((reference) => {
+      const location = locations.find((candidate) => candidate.id === reference.locationId);
+      if (!location) {
+        return;
+      }
+      let locationAssetId: UUID | undefined;
+      if (reference.spotId === "primary") {
+        locationAssetId = location.primaryAssetId as UUID | undefined;
+      } else if (reference.spotId) {
+        const spot = location.spots.find((candidate) => candidate.id === reference.spotId);
+        locationAssetId = spot?.referenceAssetId as UUID | undefined;
+      } else {
+        locationAssetId =
+          (location.primaryAssetId as UUID | undefined) ||
+          (location.spots.find((spot) => spot.referenceAssetId)?.referenceAssetId as UUID | undefined);
+      }
+      addReferenceAsset(locationAssetId);
+    });
+
+    // Gather item reference images
+    itemReferences.forEach((reference) => {
+      const item = items.find((candidate) => candidate.id === reference.itemId);
+      if (!item) {
+        return;
+      }
+      const primaryAssetId = item.angleAssets.primary?.id as UUID | undefined;
+      const alternateAssetId = item.angleAssets.alternate?.id as UUID | undefined;
+      addReferenceAsset(primaryAssetId);
+      addReferenceAsset(alternateAssetId);
+    });
+
+    // Backwards compatibility: include inline selections if no references were added yet.
+    if (!primaryReferenceAssetId) {
+      const selectedCharacter =
+        characterSelection.characterId &&
+        characters.find((candidate) => candidate.id === characterSelection.characterId);
+      const selectedSlot =
+        selectedCharacter && selectedCharacter.slots
+          ? selectedCharacter.slots.find((slot) => slot.id === characterSelection.slotId) ??
+            selectedCharacter.slots.find((slot) => slot.asset)
+          : undefined;
+      if (selectedSlot?.asset?.id) {
+        addReferenceAsset(selectedSlot.asset.id as UUID);
+      }
     }
 
-    if (locationSelection.locationId) {
+    if (!primaryReferenceAssetId && locationSelection.locationId) {
       const selectedLocation = locations.find((candidate) => candidate.id === locationSelection.locationId);
       if (selectedLocation) {
         let locationAssetId: UUID | undefined;
@@ -4273,10 +4534,7 @@ function PanelsTab({
             (selectedLocation.primaryAssetId as UUID | undefined) ||
             (selectedLocation.spots.find((spot) => spot.referenceAssetId)?.referenceAssetId as UUID | undefined);
         }
-
-        if (locationAssetId && !referenceAssetIds.includes(locationAssetId)) {
-          referenceAssetIds.push(locationAssetId);
-        }
+        addReferenceAsset(locationAssetId);
       }
     }
 
@@ -4292,6 +4550,10 @@ function PanelsTab({
         prompt: selectedPanel.prompt,
         referenceAssetId: effectiveReferenceAssetId,
         referenceAssetIds: referenceAssetIds.length > 0 ? referenceAssetIds : undefined,
+        outputDimensions: {
+          width: renderSize.width,
+          height: renderSize.height,
+        },
         model,
         geminiKey: settings.geminiKey,
         projectSlug: settings.projectSlug,
@@ -4311,10 +4573,15 @@ function PanelsTab({
       setRenderModelInFlight(null);
     }
   }, [
+    characterReferences,
     characterSelection,
     characters,
+    itemReferences,
+    items,
+    locationReferences,
     locationSelection,
     locations,
+    renderSizeId,
     selectedPanel,
     settings.geminiKey,
     settings.projectSlug,
@@ -5143,90 +5410,186 @@ function PanelsTab({
                   Pick references to seed the panel prompt. Bracketed names like <code>[Rabbit-front]</code> are
                   auto-filled; write your description around them.
                 </p>
-                <div className="field multi">
-                  <div className="field">
-                    <label htmlFor="storyboard-character">Character</label>
-                    <select
-                      id="storyboard-character"
-                      value={characterSelection.characterId ?? ""}
-                      onChange={handleCharacterChange}
-                    >
-                      <option value="">-- No character --</option>
-                      {characters.map((character) => (
-                        <option key={character.id} value={character.id}>
-                          {character.name}
-                        </option>
-                      ))}
-                    </select>
+                <div className="field">
+                  <div className="reference-row">
+                    <div className="field reference-field">
+                      <label htmlFor="storyboard-character">Character</label>
+                      <select
+                        id="storyboard-character"
+                        value={characterSelection.characterId ?? ""}
+                        onChange={handleCharacterChange}
+                      >
+                        <option value="">-- No character --</option>
+                        {characters.map((character) => (
+                          <option key={character.id} value={character.id}>
+                            {character.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field reference-field">
+                      <label htmlFor="storyboard-character-view">Character view</label>
+                      <div className="reference-action">
+                        <select
+                          id="storyboard-character-view"
+                          value={characterSelection.slotId ?? ""}
+                          onChange={handleCharacterSlotChange}
+                          disabled={!characterSelection.characterId}
+                        >
+                          <option value="">-- Any view --</option>
+                          {characterSelection.characterId &&
+                            characters
+                              .find((character) => character.id === characterSelection.characterId)
+                              ?.slots?.filter((slot) => slot.asset)
+                              .map((slot) => (
+                                <option key={slot.id} value={slot.id}>
+                                  {slot.label}
+                                </option>
+                              ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={handleAddCharacterReference}
+                          disabled={!characterSelection.characterId}
+                        >
+                          Add view
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="field">
-                    <label htmlFor="storyboard-character-view">Character view</label>
-                    <select
-                      id="storyboard-character-view"
-                      value={characterSelection.slotId ?? ""}
-                      onChange={handleCharacterSlotChange}
-                      disabled={!characterSelection.characterId}
-                    >
-                      <option value="">-- Any view --</option>
-                      {characterSelection.characterId &&
-                        characters
-                          .find((character) => character.id === characterSelection.characterId)
-                          ?.slots?.filter((slot) => slot.asset)
-                          .map((slot) => (
-                            <option key={slot.id} value={slot.id}>
-                              {slot.label}
-                            </option>
-                          ))}
-                    </select>
-                  </div>
+                  <p className="helper-text">Add specific character angles to reuse them in prompts.</p>
+                  {characterReferences.length > 0 && (
+                    <ul className="reference-list">
+                      {characterReferences.map((reference) => {
+                        const label = resolveCharacterReferenceLabel(reference);
+                        return (
+                          <li key={reference.id} className="reference-chip">
+                            <span>{label}</span>
+                            <button
+                              type="button"
+                              className="reference-remove"
+                              onClick={() => handleRemoveCharacterReference(reference.id)}
+                              aria-label={`Remove ${label}`}
+                            >
+                              ×
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </div>
-                <div className="field multi">
-                  <div className="field">
-                    <label htmlFor="storyboard-location">Location</label>
-                    <select
-                      id="storyboard-location"
-                      value={locationSelection.locationId ?? ""}
-                      onChange={handleLocationChange}
-                    >
-                      <option value="">-- No location --</option>
-                      {locations.map((location) => (
-                        <option key={location.id} value={location.id}>
-                          {location.name}
-                        </option>
-                      ))}
-                    </select>
+                <div className="field">
+                  <div className="reference-row">
+                    <div className="field reference-field">
+                      <label htmlFor="storyboard-location">Location</label>
+                      <select
+                        id="storyboard-location"
+                        value={locationSelection.locationId ?? ""}
+                        onChange={handleLocationChange}
+                      >
+                        <option value="">-- No location --</option>
+                        {locations.map((location) => (
+                          <option key={location.id} value={location.id}>
+                            {location.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field reference-field">
+                      <label htmlFor="storyboard-location-view">Location view</label>
+                      <div className="reference-action">
+                        <select
+                          id="storyboard-location-view"
+                          value={locationSelection.spotId ?? ""}
+                          onChange={handleLocationViewChange}
+                          disabled={!locationSelection.locationId}
+                        >
+                          <option value="">-- Any view --</option>
+                          {locationSelection.locationId && <option value="primary">Primary view</option>}
+                          {locationSelection.locationId &&
+                            locations
+                              .find((location) => location.id === locationSelection.locationId)
+                              ?.spots.map((spot) => (
+                                <option key={spot.id} value={spot.id}>
+                                  {spot.label}
+                                </option>
+                              ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={handleAddLocationReference}
+                          disabled={!locationSelection.locationId}
+                        >
+                          Add view
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="field">
-                    <label htmlFor="storyboard-location-view">Location view</label>
-                    <select
-                      id="storyboard-location-view"
-                      value={locationSelection.spotId ?? ""}
-                      onChange={handleLocationViewChange}
-                      disabled={!locationSelection.locationId}
-                    >
-                      <option value="">-- Any view --</option>
-                      {locationSelection.locationId && <option value="primary">Primary view</option>}
-                      {locationSelection.locationId &&
-                        locations
-                          .find((location) => location.id === locationSelection.locationId)
-                          ?.spots.map((spot) => (
-                            <option key={spot.id} value={spot.id}>
-                              {spot.label}
-                            </option>
-                          ))}
-                    </select>
-                  </div>
+                  <p className="helper-text">Stack multiple environment angles to describe scene changes.</p>
+                  {locationReferences.length > 0 && (
+                    <ul className="reference-list">
+                      {locationReferences.map((reference) => {
+                        const label = resolveLocationReferenceLabel(reference);
+                        return (
+                          <li key={reference.id} className="reference-chip">
+                            <span>{label}</span>
+                            <button
+                              type="button"
+                              className="reference-remove"
+                              onClick={() => handleRemoveLocationReference(reference.id)}
+                              aria-label={`Remove ${label}`}
+                            >
+                              ×
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </div>
                 <div className="field">
                   <label htmlFor="storyboard-items">Items</label>
-                  <select id="storyboard-items" multiple value={selectedItemIds} onChange={handleItemSelectionChange}>
-                    {items.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="helper-text">Hold Ctrl or Cmd to select multiple items.</p>
+                  <div className="reference-action">
+                    <select id="storyboard-items" value={pendingItemId} onChange={handlePendingItemChange}>
+                      <option value="">-- Select item --</option>
+                      {items.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={handleAddItemReference}
+                      disabled={!pendingItemId}
+                    >
+                      Add item
+                    </button>
+                  </div>
+                  {itemReferences.length > 0 && (
+                    <ul className="reference-list">
+                      {itemReferences.map((reference) => {
+                        const label = resolveItemReferenceLabel(reference);
+                        return (
+                          <li key={reference.id} className="reference-chip">
+                            <span>{label}</span>
+                            <button
+                              type="button"
+                              className="reference-remove"
+                              onClick={() => handleRemoveItemReference(reference.id)}
+                              aria-label={`Remove ${label}`}
+                            >
+                              ×
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </div>
                 <div className="field">
                   <label htmlFor="auto-prompt">Auto-filled context</label>
@@ -5540,6 +5903,43 @@ function PanelsTab({
                     </div>
                     <div className="field">
                       <label>Generate panel image</label>
+                      <div className="panel-render-controls">
+                        <div className="panel-orientation-toggle" role="group" aria-label="Render orientation">
+                          <button
+                            type="button"
+                            className={renderOrientation === "horizontal" ? "is-active" : ""}
+                            onClick={() => handleRenderOrientationChange("horizontal")}
+                            disabled={renderModelInFlight !== null}
+                            aria-pressed={renderOrientation === "horizontal"}
+                          >
+                            Horizontal
+                          </button>
+                          <button
+                            type="button"
+                            className={renderOrientation === "vertical" ? "is-active" : ""}
+                            onClick={() => handleRenderOrientationChange("vertical")}
+                            disabled={renderModelInFlight !== null}
+                            aria-pressed={renderOrientation === "vertical"}
+                          >
+                            Vertical
+                          </button>
+                        </div>
+                        <div className="panel-render-size-picker">
+                          <label htmlFor="panel-render-size">Render size</label>
+                          <select
+                            id="panel-render-size"
+                            value={renderSizeId}
+                            onChange={handleRenderSizeChange}
+                            disabled={renderModelInFlight !== null}
+                          >
+                            {renderSizeOptionsForOrientation.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
                       <div className="panel-generation-buttons">
                         <button
                           type="button"

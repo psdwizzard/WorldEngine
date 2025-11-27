@@ -124,11 +124,17 @@ const deletePanelSchema = z.object({
 
 const panelRenderModelSchema = z.enum(PANEL_RENDER_MODEL_VALUES);
 
+const renderDimensionsSchema = z.object({
+  width: z.number().int().min(512).max(2048),
+  height: z.number().int().min(512).max(2048),
+});
+
 const renderPanelSchema = z.object({
   panelId: z.string().uuid(),
   prompt: z.string().min(1),
   referenceAssetId: z.string().uuid().optional(),
   referenceAssetIds: z.array(z.string().uuid()).optional(),
+  outputDimensions: renderDimensionsSchema.optional(),
   model: panelRenderModelSchema.optional(),
 });
 
@@ -330,6 +336,8 @@ panelsRouter.post("/render", async (req, res) => {
     const env = loadEnv();
 
     let imageInput: { mimeType: string; data: string } | undefined;
+    const targetWidth = parsed.data.outputDimensions?.width ?? 1024;
+    const targetHeight = parsed.data.outputDimensions?.height ?? 1024;
 
     const referenceIds: UUID[] = [];
     if (parsed.data.referenceAssetId) {
@@ -348,11 +356,11 @@ panelsRouter.post("/render", async (req, res) => {
       const asset = getAsset(assetId);
       const buffer = await getAssetBuffer(assetId);
       if (asset && buffer) {
-        // Resize single image to target 1024x1024 (contain) to avoid aspect ratio bias
+        // Resize single image to target dimensions (contain) to avoid aspect ratio bias
         const resized = await sharp(buffer)
           .resize({
-            width: 1024,
-            height: 1024,
+            width: targetWidth,
+            height: targetHeight,
             fit: "contain",
             background: { r: 0, g: 0, b: 0, alpha: 1 }, // Black background for "void"
           })
@@ -376,8 +384,8 @@ panelsRouter.post("/render", async (req, res) => {
       if (buffers.length === 1) {
         const resized = await sharp(buffers[0])
           .resize({
-            width: 1024,
-            height: 1024,
+            width: targetWidth,
+            height: targetHeight,
             fit: "contain",
             background: { r: 0, g: 0, b: 0, alpha: 1 },
           })
@@ -406,8 +414,8 @@ panelsRouter.post("/render", async (req, res) => {
 
         const combined = await sharp({
           create: {
-            width: width || 1024,
-            height: totalHeight || 1024,
+            width: width || targetWidth,
+            height: totalHeight || targetHeight,
             channels: 4,
             background: { r: 0, g: 0, b: 0, alpha: 0 },
           },
@@ -416,11 +424,11 @@ panelsRouter.post("/render", async (req, res) => {
           .png()
           .toBuffer();
         
-        // Force the combined image into a 1024x1024 container
+        // Force the combined image into a target-sized container
         const resized = await sharp(combined)
           .resize({
-             width: 1024,
-             height: 1024,
+             width: targetWidth,
+             height: targetHeight,
              fit: "contain",
              background: { r: 0, g: 0, b: 0, alpha: 1 },
           })
@@ -441,8 +449,8 @@ panelsRouter.post("/render", async (req, res) => {
       imageInput,
       model: targetModel,
       outputDimensions: {
-        width: 1024,
-        height: 1024,
+        width: targetWidth,
+        height: targetHeight,
       },
     };
 

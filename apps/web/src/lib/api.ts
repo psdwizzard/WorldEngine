@@ -674,6 +674,10 @@ export async function renderPanelImage(input: {
   referenceAssetId?: UUID;
   referenceAssetIds?: UUID[];
   model?: PanelRenderModel;
+  outputDimensions?: {
+    width: number;
+    height: number;
+  };
   geminiKey?: string;
   projectSlug?: string;
 }): Promise<{ page: StoryboardPage; panel: StoryboardPanel; asset: AssetReference }> {
@@ -688,6 +692,7 @@ export async function renderPanelImage(input: {
       prompt: input.prompt,
       referenceAssetId: input.referenceAssetId,
       referenceAssetIds: input.referenceAssetIds,
+      outputDimensions: input.outputDimensions,
       model: input.model,
     }),
   });
