@@ -36,6 +36,13 @@ A web-based storyboard and world-building tool powered by Google Gemini AI. Crea
    - Web UI: http://localhost:5173
    - API: http://localhost:4000
 
+## Workspace data
+
+- All generated projects, assets, and storyboard JSON files now live under `workspace-data/` in the repo root.
+- Copying that single folder between machines moves every project, asset, and issue without hunting for hidden paths.
+- The API automatically migrates older installs that previously stored data in `apps/api/output`.
+- Feel free to keep `workspace-data/` out of git (already ignored) — just drag it along with the repo when switching PCs.
+
 ## Tech Stack
 
 - **Frontend:** React + TypeScript + Vite

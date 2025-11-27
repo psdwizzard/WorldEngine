@@ -18,3 +18,5 @@ coverage/tmp/
 apps/api/output/**
 !apps/api/output/.gitkeep
 .dev/
+workspace-data/**
+!workspace-data/.gitkeep

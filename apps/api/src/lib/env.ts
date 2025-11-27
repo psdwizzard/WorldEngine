@@ -1,8 +1,13 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { config as load } from "dotenv";
 import { z } from "zod";
 
-export const DEFAULT_DATA_ROOT = path.resolve(process.cwd(), "output");
+const apiLibDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(apiLibDir, "..", "..", "..", "..");
+
+export const LEGACY_DATA_ROOT = path.resolve(process.cwd(), "output");
+export const DEFAULT_DATA_ROOT = path.join(repoRoot, "workspace-data");
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
