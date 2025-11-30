@@ -466,6 +466,13 @@ textarea {
   gap: 0.75rem;
 }
 
+.panel-edit-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
 .panel-render-controls {
   display: flex;
   flex-wrap: wrap;
@@ -506,6 +513,34 @@ textarea {
 .panel-generation-buttons button {
   flex: 1 1 220px;
   min-width: 220px;
+}
+
+.panel-edit-buttons button {
+  flex: 1 1 200px;
+  min-width: 200px;
+}
+
+.panel-edit-buttons button.secondary {
+  background: rgba(36, 42, 58, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.9);
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.65rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.panel-edit-buttons button.secondary:hover:not(:disabled) {
+  background: rgba(70, 92, 130, 0.95);
+  border-color: rgba(124, 189, 255, 0.65);
+  transform: translateY(-1px);
+}
+
+.panel-edit-buttons button.secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .panel-history-buttons {

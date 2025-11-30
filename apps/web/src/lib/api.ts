@@ -712,10 +712,52 @@ export async function renderPanelImage(input: {
   return { page: payload.page, panel: payload.panel, asset: payload.asset };
 }
 
+export async function editPanelImage(input: {
+  panelId: UUID;
+  prompt: string;
+  assetId?: UUID;
+  model?: PanelRenderModel;
+  outputDimensions?: {
+    width: number;
+    height: number;
+  };
+  geminiKey?: string;
+  projectSlug?: string;
+}): Promise<{ page: StoryboardPage; panel: StoryboardPanel; asset: AssetReference }> {
+  const response = await fetch(resolveUrl("/panels/edit"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeader({ geminiKey: input.geminiKey, projectSlug: input.projectSlug }),
+    },
+    body: JSON.stringify({
+      panelId: input.panelId,
+      prompt: input.prompt,
+      assetId: input.assetId,
+      model: input.model,
+      outputDimensions: input.outputDimensions,
+    }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to edit panel image");
+  }
+
+  const payload = (await response.json()) as {
+    status: string;
+    page: StoryboardPage;
+    panel: StoryboardPanel;
+    asset: AssetReference;
+  };
+
+  return { page: payload.page, panel: payload.panel, asset: payload.asset };
+}
+
 export async function fetchProjects(): Promise<ProjectSummary[]> {
   const response = await fetch(resolveUrl("/projects"));
   if (!response.ok) {
-    const message = await response.text();
+  const message = await response.text();
     throw new Error(message || "Failed to load projects");
   }
 

@@ -47,9 +47,18 @@ export async function generateImage(
     });
   }
 
+  // Note: outputImageDimensions is not supported by all models (e.g., gemini-2.5-flash-image)
+  // We rely on the dimension instruction appended to the prompt instead
+  const generationConfig: Record<string, unknown> = {
+    responseMimeType: "image/png",
+  };
+
   try {
-    console.log(`gemini:generate_image model=${modelName}`);
-    const result = await model.generateContent(promptParts);
+    console.log(`gemini:generate_image model=${modelName} size=${width}x${height}`);
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: promptParts }],
+      generationConfig,
+    });
     const aiDescription = extractAiDescription(result.response);
     const inlineImage = extractInlineImage(result.response);
 

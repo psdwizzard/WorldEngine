@@ -140,18 +140,31 @@ const renderPanelSchema = z.object({
 
 const DEFAULT_PANEL_RENDER_MODEL: PanelRenderModel = "nano-banana";
 
+const editPanelSchema = z.object({
+  panelId: z.string().uuid(),
+  prompt: z.string().min(1),
+  assetId: z.string().uuid().optional(),
+  model: panelRenderModelSchema.optional(),
+  outputDimensions: renderDimensionsSchema.optional(),
+});
+
 function resolvePanelRenderModel(
   requested: PanelRenderModel | undefined,
   env: EnvConfig,
   fallbackModel: string,
 ): string {
   const model = requested ?? DEFAULT_PANEL_RENDER_MODEL;
+
   if (model === "nano-banana") {
     return env.NANO_BANANA_MODEL ?? fallbackModel;
   }
 
   if (model === "nano-banana-pro") {
-    return env.NANO_BANANA_PRO_MODEL ?? env.NANO_BANANA_MODEL ?? fallbackModel;
+    const resolved = env.NANO_BANANA_PRO_MODEL ?? env.NANO_BANANA_MODEL ?? fallbackModel;
+    if (!env.NANO_BANANA_PRO_MODEL && !env.NANO_BANANA_MODEL) {
+      console.warn("panels:pro_model_fallback", { resolved });
+    }
+    return resolved;
   }
 
   return fallbackModel;
@@ -493,6 +506,139 @@ panelsRouter.post("/render", async (req, res) => {
   } catch (error) {
     console.error("panels:render_failed", error);
     res.status(500).json({ error: "render_failed" });
+  }
+});
+
+panelsRouter.post("/edit", async (req, res) => {
+  const parsed = editPanelSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid_edit_payload", issues: parsed.error.flatten() });
+  }
+
+  const projectSlug = resolveProjectSlug(req);
+
+  // Search ALL pages for the panel, not just the active page
+  const found = findPanelById(projectSlug, parsed.data.panelId as UUID);
+  if (!found) {
+    return res.status(404).json({ error: "panel_not_found" });
+  }
+
+  const { page, panel } = found;
+  const fallbackAssetId = panel.renderAssetId ?? panel.replacedAssetIds?.[panel.replacedAssetIds.length - 1];
+  const targetAssetId = parsed.data.assetId ?? fallbackAssetId;
+
+  if (!targetAssetId) {
+    return res.status(400).json({ error: "missing_panel_asset" });
+  }
+
+  try {
+    const { generateImage, DEFAULT_IMAGE_MODEL } = await import("../lib/gemini");
+    const env = loadEnv();
+    const asset = getAsset(targetAssetId);
+    const buffer = await getAssetBuffer(targetAssetId);
+
+    if (!asset || !buffer) {
+      return res.status(404).json({ error: "panel_asset_not_found" });
+    }
+
+    const metadata = await sharp(buffer).metadata();
+    const maxDimension = 2048;
+    const minDimension = 512;
+
+    let targetWidth = parsed.data.outputDimensions?.width ?? metadata.width ?? 1024;
+    let targetHeight = parsed.data.outputDimensions?.height ?? metadata.height ?? 1024;
+
+    if (!Number.isFinite(targetWidth) || targetWidth <= 0) {
+      targetWidth = 1024;
+    }
+    if (!Number.isFinite(targetHeight) || targetHeight <= 0) {
+      targetHeight = 1024;
+    }
+
+    if (targetWidth > maxDimension || targetHeight > maxDimension) {
+      const scale = Math.min(maxDimension / targetWidth, maxDimension / targetHeight);
+      targetWidth = Math.round(targetWidth * scale);
+      targetHeight = Math.round(targetHeight * scale);
+    }
+
+    if (targetWidth < minDimension || targetHeight < minDimension) {
+      const scale = Math.max(minDimension / targetWidth, minDimension / targetHeight);
+      targetWidth = Math.round(targetWidth * scale);
+      targetHeight = Math.round(targetHeight * scale);
+    }
+
+    const resizedBase = await sharp(buffer)
+      .resize({
+        width: targetWidth,
+        height: targetHeight,
+        fit: "contain",
+        background: { r: 0, g: 0, b: 0, alpha: 1 },
+      })
+      .png()
+      .toBuffer();
+
+    const targetModel = resolvePanelRenderModel(parsed.data.model, env, DEFAULT_IMAGE_MODEL);
+
+    const result = await generateImage(
+      env,
+      {
+        prompt: parsed.data.prompt,
+        imageInput: {
+          mimeType: asset.meta.mimeType || "image/png",
+          data: resizedBase.toString("base64"),
+        },
+        model: targetModel,
+        outputDimensions: {
+          width: targetWidth,
+          height: targetHeight,
+        },
+      },
+      {
+        apiKeyOverride: req.header("x-gemini-key") ?? undefined,
+      },
+    );
+
+    const editedAsset = await saveAssetBuffer(result.imageBuffer, {
+      scope: ["panels", page.id, panel.id],
+      mimeType: "image/png",
+      filename: `panel-${panel.order + 1}-edit-${Date.now()}.png`,
+      aiDescription: result.aiDescription,
+      generatedFromPrompt: parsed.data.prompt,
+      projectSlug,
+    });
+
+    const replacedAssetIds = [...(panel.replacedAssetIds ?? [])];
+    const pushIfMissing = (id?: UUID | null) => {
+      if (id && !replacedAssetIds.includes(id)) {
+        replacedAssetIds.push(id);
+      }
+    };
+    pushIfMissing(panel.renderAssetId);
+    // Ensure the edited source is in history even if it was not the latest.
+    if (targetAssetId !== panel.renderAssetId) {
+      pushIfMissing(targetAssetId as UUID);
+    }
+
+    const updatedPanel: StoryboardPanel = {
+      ...panel,
+      renderAssetId: editedAsset.id,
+      replacedAssetIds: replacedAssetIds.length > 0 ? replacedAssetIds : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updatedPage: StoryboardPage = {
+      ...page,
+      panels: page.panels.map((candidate) => (candidate.id === updatedPanel.id ? updatedPanel : candidate)),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const savedPage = await saveStoryboardPage(projectSlug, updatedPage);
+    const savedPanel = savedPage.panels.find((candidate) => candidate.id === updatedPanel.id) ?? updatedPanel;
+
+    res.json({ status: "edited", page: savedPage, panel: savedPanel, asset: editedAsset });
+  } catch (error) {
+    console.error("panels:edit_failed", error);
+    res.status(500).json({ error: "edit_failed" });
   }
 });
 

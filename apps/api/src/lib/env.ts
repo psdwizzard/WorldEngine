@@ -25,7 +25,10 @@ export type EnvConfig = z.infer<typeof envSchema> & {
 };
 
 export function loadEnv(): EnvConfig {
+  // Load env from repo root for shared defaults
   load({ path: ".env.local", override: false });
+  // Load API-specific env placed under apps/api/.env.local
+  load({ path: path.join(repoRoot, "apps", "api", ".env.local"), override: false });
 
   const parsed = envSchema.parse(process.env);
 

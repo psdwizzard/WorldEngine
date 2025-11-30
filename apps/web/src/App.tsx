@@ -43,6 +43,7 @@ import {
   generateLocationView,
   generateLocationFromImage,
   renderPanelImage,
+  editPanelImage,
   uploadPanelImage,
   listStoryboardPages,
   createStoryboardPageApi,
@@ -2446,6 +2447,7 @@ function PanelsTab({
     bubble: true,
   });
   const [renderModelInFlight, setRenderModelInFlight] = useState<PanelRenderModel | null>(null);
+  const [panelActionInFlight, setPanelActionInFlight] = useState<"render" | "edit" | null>(null);
   const [updatingPageIssue, setUpdatingPageIssue] = useState(false);
   // Track which history index each panel is viewing (undefined = latest/current)
   const [panelHistoryIndex, setPanelHistoryIndex] = useState<Record<UUID, number>>({});
@@ -3335,12 +3337,14 @@ function PanelsTab({
   const statusMessage = useMemo(() => {
     if (status === "loading") return "Loading layout...";
     if (status === "saving") return "Saving changes...";
-    if (status === "generating") return "Generating panel image...";
+    if (status === "generating") {
+      return panelActionInFlight === "edit" ? "Editing panel image..." : "Generating panel image...";
+    }
     if (status === "saved") return "Layout saved";
     if (status === "error") return error ?? "Layout unavailable";
     if (hasChanges) return "Unsaved changes";
     return "Drag panels or update metadata";
-  }, [status, error, hasChanges]);
+  }, [status, error, hasChanges, panelActionInFlight]);
 
   const renderButtonDisabled =
     !selectedPanel ||
@@ -3352,10 +3356,20 @@ function PanelsTab({
 
   const renderButtonLabel = (model: PanelRenderModel) => {
     const label = PANEL_RENDER_MODEL_LABELS[model] ?? "Nano Banana";
-    if (status === "generating" && renderModelInFlight === model) {
+    if (status === "generating" && renderModelInFlight === model && panelActionInFlight === "render") {
       return `Generating with ${label}...`;
     }
     return `Generate Panel Image with ${label}`;
+  };
+
+  const editButtonDisabled = renderButtonDisabled || !getPanelDisplayAssetId(selectedPanel);
+
+  const editButtonLabel = (model: PanelRenderModel) => {
+    const label = PANEL_RENDER_MODEL_LABELS[model] ?? "Nano Banana";
+    if (status === "generating" && renderModelInFlight === model && panelActionInFlight === "edit") {
+      return `Editing with ${label}...`;
+    }
+    return `Edit with ${label}`;
   };
 
   const handleLabelChange = useCallback(
@@ -4541,6 +4555,7 @@ function PanelsTab({
     const effectiveReferenceAssetId = primaryReferenceAssetId ?? referenceAssetIds[0];
 
     setRenderModelInFlight(model);
+    setPanelActionInFlight("render");
     setStatus("generating");
     setError(null);
 
@@ -4571,6 +4586,7 @@ function PanelsTab({
       setStatus("error");
     } finally {
       setRenderModelInFlight(null);
+      setPanelActionInFlight(null);
     }
   }, [
     characterReferences,
@@ -4586,7 +4602,60 @@ function PanelsTab({
     settings.geminiKey,
     settings.projectSlug,
     setRenderModelInFlight,
+    setPanelActionInFlight,
   ]);
+
+  const handleEditSelectedPanel = useCallback(
+    async (model: PanelRenderModel = "nano-banana") => {
+      if (!selectedPanel || !selectedPanel.prompt || selectedPanel.prompt.trim().length === 0) {
+        setError("Add a prompt for the selected panel before editing an image.");
+        return;
+      }
+
+      const activeAssetId = getPanelDisplayAssetId(selectedPanel);
+      if (!activeAssetId) {
+        setError("Render or upload a panel image before editing it.");
+        return;
+      }
+
+      setRenderModelInFlight(model);
+      setPanelActionInFlight("edit");
+      setStatus("generating");
+      setError(null);
+
+      try {
+        const result = await editPanelImage({
+          panelId: selectedPanel.id,
+          prompt: selectedPanel.prompt,
+          assetId: activeAssetId,
+          model,
+          geminiKey: settings.geminiKey,
+          projectSlug: settings.projectSlug,
+        });
+        setPage(result.page);
+        setPanelHistoryIndex((previous) => {
+          const updated = { ...previous };
+          delete updated[selectedPanel.id];
+          return updated;
+        });
+        setStatus("saved");
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Failed to edit panel image");
+        setStatus("error");
+      } finally {
+        setRenderModelInFlight(null);
+        setPanelActionInFlight(null);
+      }
+    },
+    [
+      getPanelDisplayAssetId,
+      selectedPanel,
+      settings.geminiKey,
+      settings.projectSlug,
+      setRenderModelInFlight,
+      setPanelActionInFlight,
+    ],
+  );
 
   const handleStrokeWidthChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -5956,6 +6025,24 @@ function PanelsTab({
                           disabled={renderButtonDisabled}
                         >
                           {renderButtonLabel("nano-banana-pro")}
+                        </button>
+                      </div>
+                      <div className="panel-edit-buttons">
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => handleEditSelectedPanel("nano-banana")}
+                          disabled={editButtonDisabled}
+                        >
+                          {editButtonLabel("nano-banana")}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => handleEditSelectedPanel("nano-banana-pro")}
+                          disabled={editButtonDisabled}
+                        >
+                          {editButtonLabel("nano-banana-pro")}
                         </button>
                       </div>
                       <div className="panel-history-buttons">
