@@ -2415,6 +2415,7 @@ function PanelsTab({
   const [selectedBubbleId, setSelectedBubbleId] = useState<UUID | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [canvasDisplayWidth, setCanvasDisplayWidth] = useState(0);
   const interactionRef = useRef<InteractionState | null>(null);
   const [characters, setCharacters] = useState<CharacterView[]>([]);
   const [locations, setLocations] = useState<LocationBlueprint[]>([]);
@@ -2465,6 +2466,21 @@ function PanelsTab({
     const fallback = renderSizeOptionsForOrientation[0]?.id ?? PANEL_RENDER_SIZE_OPTIONS[0].id;
     setRenderSizeId(fallback as PanelRenderSizeId);
   }, [renderOrientation, renderSizeId, renderSizeOptionsForOrientation]);
+
+  // Track canvas display size to scale strokes proportionally to export resolution
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const updateWidth = () => {
+      setCanvasDisplayWidth(canvas.clientWidth);
+    };
+
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [page]);
 
   // Get available issues from all project pages + custom issues
   const availableIssues = useMemo(() => {
@@ -4702,139 +4718,134 @@ function PanelsTab({
     [selectedPanel, updatePanel],
   );
 
+  // Corner offset change - simple and intuitive
+  // Values are stored as fractions of panel size, displayed as pixels
+  // The panel bounding box does NOT change - only the corner positions within it
+  // This means you can freely drag any corner without the numbers jumping around
   const handleCornerOffsetChange = useCallback(
     (
       corner: "topLeft" | "topRight" | "bottomLeft" | "bottomRight",
       axis: "x" | "y",
-      valuePxOutward: number,
+      valuePx: number, // pixels relative to current panel size
     ) => {
       if (!selectedPanel || !page) return;
-      if (!Number.isFinite(valuePxOutward)) return;
+      if (!Number.isFinite(valuePx)) return;
 
-      const panelWidthPx = page.width * selectedPanel.geometry.width;
-      const panelHeightPx = page.height * selectedPanel.geometry.height;
-
-      // Treat positive values as "push this corner outward" relative to the panel.
-      // Left corners: outward X is negative; right corners: outward X is positive.
-      // Top corners: outward Y is negative; bottom corners: outward Y is positive.
-      const outwardX = corner === "topLeft" || corner === "bottomLeft" ? -1 : 1;
-      const outwardY = corner === "topLeft" || corner === "topRight" ? -1 : 1;
-      const sign = axis === "x" ? outwardX : outwardY;
-
+      const geometry = selectedPanel.geometry;
+      const panelWidthPx = page.width * geometry.width;
+      const panelHeightPx = page.height * geometry.height;
+      
       const dimension = axis === "x" ? panelWidthPx : panelHeightPx;
       if (!Number.isFinite(dimension) || dimension <= 0) return;
 
-      // Store offsets as a fraction of the panel's own width/height.
-      const normalizedDelta = (valuePxOutward * sign) / dimension;
+      // Convert pixels to fraction of panel size
+      const normalizedDelta = valuePx / dimension;
 
-      const geometry = selectedPanel.geometry;
       const currentOffsets = geometry.cornerOffsets ?? {};
       const currentCorner = currentOffsets[corner] ?? { x: 0, y: 0 };
       const nextCorner = { ...currentCorner, [axis]: normalizedDelta };
 
-      const offsetsWithCorner = { ...currentOffsets, [corner]: nextCorner };
-
-      // Compute the polygon in the current panel-local coordinate space.
-      const tlOffset = offsetsWithCorner.topLeft ?? { x: 0, y: 0 };
-      const trOffset = offsetsWithCorner.topRight ?? { x: 0, y: 0 };
-      const brOffset = offsetsWithCorner.bottomRight ?? { x: 0, y: 0 };
-      const blOffset = offsetsWithCorner.bottomLeft ?? { x: 0, y: 0 };
-
-      const tlLocal = { x: 0 + tlOffset.x, y: 0 + tlOffset.y };
-      const trLocal = { x: 1 + trOffset.x, y: 0 + trOffset.y };
-      const brLocal = { x: 1 + brOffset.x, y: 1 + brOffset.y };
-      const blLocal = { x: 0 + blOffset.x, y: 1 + blOffset.y };
-
-      const minX = Math.min(tlLocal.x, trLocal.x, brLocal.x, blLocal.x);
-      const maxX = Math.max(tlLocal.x, trLocal.x, brLocal.x, blLocal.x);
-      const minY = Math.min(tlLocal.y, trLocal.y, brLocal.y, blLocal.y);
-      const maxY = Math.max(tlLocal.y, trLocal.y, brLocal.y, blLocal.y);
-
-      const scaleX = maxX - minX;
-      const scaleY = maxY - minY;
-      if (scaleX <= 0 || scaleY <= 0) {
-        return;
+      // Store the offset directly without renormalization
+      const nextOffsets: NonNullable<PanelGeometry["cornerOffsets"]> = { ...currentOffsets };
+      
+      if (Math.abs(nextCorner.x) < 0.0001 && Math.abs(nextCorner.y) < 0.0001) {
+        delete nextOffsets[corner];
+      } else {
+        nextOffsets[corner] = nextCorner;
       }
 
-      // Expand the panel's geometry so the new polygon fits inside the bounding box.
-      const newGeometry: PanelGeometry = {
-        x: geometry.x + geometry.width * minX,
-        y: geometry.y + geometry.height * minY,
-        width: geometry.width * scaleX,
-        height: geometry.height * scaleY,
-        cornerOffsets: undefined, // will be re-normalized below
-      };
-
-      // Re-normalize offsets into the new 0-1 local space.
-      const renormalize = (local: { x: number; y: number }): { x: number; y: number } => ({
-        x: (local.x - minX) / scaleX,
-        y: (local.y - minY) / scaleY,
-      });
-
-      const tlNorm = renormalize(tlLocal);
-      const trNorm = renormalize(trLocal);
-      const brNorm = renormalize(brLocal);
-      const blNorm = renormalize(blLocal);
-
-      const nextOffsets: NonNullable<PanelGeometry["cornerOffsets"]> = {};
-
-      const addIfNonZero = (
-        key: keyof NonNullable<PanelGeometry["cornerOffsets"]>,
-        base: { x: number; y: number },
-        local: { x: number; y: number },
-      ) => {
-        const delta = { x: local.x - base.x, y: local.y - base.y };
-        if (delta.x !== 0 || delta.y !== 0) {
-          nextOffsets[key] = delta;
-        }
-      };
-
-      addIfNonZero("topLeft", { x: 0, y: 0 }, tlNorm);
-      addIfNonZero("topRight", { x: 1, y: 0 }, trNorm);
-      addIfNonZero("bottomRight", { x: 1, y: 1 }, brNorm);
-      addIfNonZero("bottomLeft", { x: 0, y: 1 }, blNorm);
-
-      const hasOffsets = Object.keys(nextOffsets).length > 0;
-
+      // Keep cornerOffsets as an empty object (not undefined) to preserve free mode
+      // User must explicitly use "Reset to Rectangle" or uncheck the checkbox to exit free mode
       updateGeometry(selectedPanel.id, {
-        ...newGeometry,
-        cornerOffsets: hasOffsets ? nextOffsets : undefined,
+        ...geometry,
+        cornerOffsets: nextOffsets,
       });
     },
     [page, selectedPanel, updateGeometry],
   );
 
+  // Compute expanded geometry and clip path for a panel with corner offsets
+  // Returns { geometry, clipPoints } where geometry may be expanded to fit all corners
+  const computePanelGeometry = (panel: StoryboardPanel) => {
+    const offsets = panel.geometry.cornerOffsets;
+    
+    if (!offsets) {
+      return {
+        geometry: panel.geometry,
+        clipPoints: null,
+      };
+    }
+
+    // Corner offsets are stored as fractions of panel size
+    const tlOff = offsets.topLeft ?? { x: 0, y: 0 };
+    const trOff = offsets.topRight ?? { x: 0, y: 0 };
+    const brOff = offsets.bottomRight ?? { x: 0, y: 0 };
+    const blOff = offsets.bottomLeft ?? { x: 0, y: 0 };
+
+    // Calculate corner positions in local 0-1 space (relative to original panel)
+    const corners = {
+      tl: { x: 0 + tlOff.x, y: 0 + tlOff.y },
+      tr: { x: 1 + trOff.x, y: 0 + trOff.y },
+      br: { x: 1 + brOff.x, y: 1 + brOff.y },
+      bl: { x: 0 + blOff.x, y: 1 + blOff.y },
+    };
+
+    // Find bounding box of all corners
+    const minX = Math.min(corners.tl.x, corners.tr.x, corners.br.x, corners.bl.x);
+    const maxX = Math.max(corners.tl.x, corners.tr.x, corners.br.x, corners.bl.x);
+    const minY = Math.min(corners.tl.y, corners.tr.y, corners.br.y, corners.bl.y);
+    const maxY = Math.max(corners.tl.y, corners.tr.y, corners.br.y, corners.bl.y);
+
+    const scaleX = maxX - minX;
+    const scaleY = maxY - minY;
+
+    if (scaleX <= 0 || scaleY <= 0) {
+      return { geometry: panel.geometry, clipPoints: null };
+    }
+
+    // Expand geometry to fit all corners
+    const expandedGeometry: PanelGeometry = {
+      ...panel.geometry,
+      x: panel.geometry.x + panel.geometry.width * minX,
+      y: panel.geometry.y + panel.geometry.height * minY,
+      width: panel.geometry.width * scaleX,
+      height: panel.geometry.height * scaleY,
+    };
+
+    // Convert corner positions to percentages within the expanded bounding box
+    const clipPoints = {
+      tl: { x: ((corners.tl.x - minX) / scaleX) * 100, y: ((corners.tl.y - minY) / scaleY) * 100 },
+      tr: { x: ((corners.tr.x - minX) / scaleX) * 100, y: ((corners.tr.y - minY) / scaleY) * 100 },
+      br: { x: ((corners.br.x - minX) / scaleX) * 100, y: ((corners.br.y - minY) / scaleY) * 100 },
+      bl: { x: ((corners.bl.x - minX) / scaleX) * 100, y: ((corners.bl.y - minY) / scaleY) * 100 },
+    };
+
+    return { geometry: expandedGeometry, clipPoints };
+  };
+
   const renderPanelStyle = (panel: StoryboardPanel) => {
+    const { geometry, clipPoints } = computePanelGeometry(panel);
+
     const style: React.CSSProperties = {
-      left: `${panel.geometry.x * 100}%`,
-      top: `${panel.geometry.y * 100}%`,
-      width: `${panel.geometry.width * 100}%`,
-      height: `${panel.geometry.height * 100}%`,
+      left: `${geometry.x * 100}%`,
+      top: `${geometry.y * 100}%`,
+      width: `${geometry.width * 100}%`,
+      height: `${geometry.height * 100}%`,
     };
 
     const shadowBlur = panel.shadowBlur ?? 0;
     const shadowColor = panel.shadowColor ?? "rgba(0, 0, 0, 0.35)";
 
-    const offsets = panel.geometry.cornerOffsets;
-    if (offsets) {
-      // Compute polygon points in % relative to the bounding box
-      // The bounding box is 0,0 to 100,100 in its own coordinate space
-      // Offsets are normalized relative to page size, so we need to convert to % of panel size
-      
-      // x_percent = (offset_x_normalized / panel_width_normalized) * 100
-      const toPercentX = (val: number) => (val / panel.geometry.width) * 100;
-      const toPercentY = (val: number) => (val / panel.geometry.height) * 100;
-
-      const tl = { x: 0 + toPercentX(offsets.topLeft?.x ?? 0), y: 0 + toPercentY(offsets.topLeft?.y ?? 0) };
-      const tr = { x: 100 + toPercentX(offsets.topRight?.x ?? 0), y: 0 + toPercentY(offsets.topRight?.y ?? 0) };
-      const br = { x: 100 + toPercentX(offsets.bottomRight?.x ?? 0), y: 100 + toPercentY(offsets.bottomRight?.y ?? 0) };
-      const bl = { x: 0 + toPercentX(offsets.bottomLeft?.x ?? 0), y: 100 + toPercentY(offsets.bottomLeft?.y ?? 0) };
-
-      style.clipPath = `polygon(${tl.x}% ${tl.y}%, ${tr.x}% ${tr.y}%, ${br.x}% ${br.y}%, ${bl.x}% ${bl.y}%)`;
-    } else {
-       style.borderWidth = panel.strokeWidth ? `${panel.strokeWidth}px` : undefined;
+    if (clipPoints) {
+      style.clipPath = `polygon(${clipPoints.tl.x}% ${clipPoints.tl.y}%, ${clipPoints.tr.x}% ${clipPoints.tr.y}%, ${clipPoints.br.x}% ${clipPoints.br.y}%, ${clipPoints.bl.x}% ${clipPoints.bl.y}%)`;
+    } else if (panel.strokeWidth) {
+       // Scale border width to match how it will appear in the export
+       const exportWidth = page?.width || 1988;
+       const strokeScale = canvasDisplayWidth > 0 ? canvasDisplayWidth / exportWidth : 1;
+       const scaledStrokeWidth = panel.strokeWidth * strokeScale;
+       style.borderWidth = `${scaledStrokeWidth}px`;
        style.borderColor = panel.strokeColor;
-       style.borderStyle = panel.strokeWidth ? "solid" : undefined;
+       style.borderStyle = "solid";
     }
 
     if (shadowBlur > 0) {
@@ -5148,37 +5159,39 @@ function PanelsTab({
                     ) : null;
                   })()}
                   
-                  {offsets && panel.strokeWidth && panel.strokeWidth > 0 && (
-                     <svg 
-                       className="panel-stroke-overlay" 
-                       viewBox="0 0 100 100" 
-                       preserveAspectRatio="none"
-                       style={{
-                         position: "absolute",
-                         top: 0,
-                         left: 0,
-                         width: "100%",
-                         height: "100%",
-                         pointerEvents: "none",
-                         overflow: "visible"
-                       }}
-                     >
-                       <polygon
-                         points={`
-                           ${0 + (offsets.topLeft?.x ?? 0) / panel.geometry.width * 100},${0 + (offsets.topLeft?.y ?? 0) / panel.geometry.height * 100} 
-                           ${100 + (offsets.topRight?.x ?? 0) / panel.geometry.width * 100},${0 + (offsets.topRight?.y ?? 0) / panel.geometry.height * 100} 
-                           ${100 + (offsets.bottomRight?.x ?? 0) / panel.geometry.width * 100},${100 + (offsets.bottomRight?.y ?? 0) / panel.geometry.height * 100} 
-                           ${0 + (offsets.bottomLeft?.x ?? 0) / panel.geometry.width * 100},${100 + (offsets.bottomLeft?.y ?? 0) / panel.geometry.height * 100}
-                         `}
-                         fill="none"
-                         stroke={panel.strokeColor ?? "#000000"}
-                         strokeWidth={panel.strokeWidth ? (panel.strokeWidth / (page.width * panel.geometry.width)) * 100 : 0} // This is an approximation, real SVG stroke width is complex with non-uniform scaling.
-                         // Better approach for stroke: vector-effect="non-scaling-stroke" but that requires unscaled coordinate space.
-                         // Let's stick to simple scaling for now or assume uniform aspect.
-                         vectorEffect="non-scaling-stroke"
-                       />
-                     </svg>
-                  )}
+                  {(() => {
+                    const { clipPoints: cp } = computePanelGeometry(panel);
+                    if (!cp || !panel.strokeWidth || panel.strokeWidth <= 0) return null;
+                    // Scale stroke width to match how it will appear in the export.
+                    // Export uses page.width (or 1988) pixels, so we scale proportionally.
+                    const exportWidth = page?.width || 1988;
+                    const strokeScale = canvasDisplayWidth > 0 ? canvasDisplayWidth / exportWidth : 1;
+                    const scaledStrokeWidth = panel.strokeWidth * strokeScale;
+                    return (
+                      <svg 
+                        className="panel-stroke-overlay" 
+                        viewBox="0 0 100 100" 
+                        preserveAspectRatio="none"
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          height: "100%",
+                          pointerEvents: "none",
+                          overflow: "visible"
+                        }}
+                      >
+                        <polygon
+                          points={`${cp.tl.x},${cp.tl.y} ${cp.tr.x},${cp.tr.y} ${cp.br.x},${cp.br.y} ${cp.bl.x},${cp.bl.y}`}
+                          fill="none"
+                          stroke={panel.strokeColor ?? "#000000"}
+                          vectorEffect="non-scaling-stroke"
+                          strokeWidth={scaledStrokeWidth}
+                        />
+                      </svg>
+                    );
+                  })()}
 
                   <span className="panel-label">{panel.label || "Untitled panel"}</span>
                   <span className="panel-order">#{panel.order + 1}</span>
@@ -5186,76 +5199,92 @@ function PanelsTab({
                   <div className="panel-handle handle-ne" onPointerDown={beginResize(panel.id, "ne")} aria-hidden />
                   <div className="panel-handle handle-sw" onPointerDown={beginResize(panel.id, "sw")} aria-hidden />
                   <div className="panel-handle handle-se" onPointerDown={beginResize(panel.id, "se")} aria-hidden />
-                  {editingPanelId === panel.id && (
-                    <div className="panel-zoom-controls">
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleZoom("out");
-                        }}
-                      >
-                        -
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          movePanelLayer(panel.id, "down");
-                        }}
-                        title="Send panel backward"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          movePanelLayer(panel.id, "up");
-                        }}
-                        title="Bring panel forward"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleZoom("in");
-                        }}
-                      >
-                        +
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleResetCrop();
-                        }}
-                      >
-                        Reset
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setEditingPanelId(null);
-                          void handleSave();
-                        }}
-                      >
-                        Done
-                      </button>
-                    </div>
-                  )}
                 </div>
               );})
             }
+            {/* Floating zoom controls - rendered outside panel to avoid overflow:hidden clipping */}
+            {editingPanelId && page && (() => {
+              const editingPanel = page.panels.find(p => p.id === editingPanelId);
+              if (!editingPanel) return null;
+              const { geometry } = computePanelGeometry(editingPanel);
+              // Position controls above panel if in lower half of canvas, otherwise below
+              const isLowerHalf = geometry.y + geometry.height > 0.65;
+              return (
+                <div
+                  className={`panel-zoom-controls ${isLowerHalf ? 'above' : ''}`}
+                  style={{
+                    left: `${(geometry.x + geometry.width / 2) * 100}%`,
+                    top: isLowerHalf
+                      ? `${geometry.y * 100}%`
+                      : `${(geometry.y + geometry.height) * 100}%`,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleZoom("out");
+                    }}
+                  >
+                    -
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      movePanelLayer(editingPanelId, "down");
+                    }}
+                    title="Send panel backward"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      movePanelLayer(editingPanelId, "up");
+                    }}
+                    title="Bring panel forward"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleZoom("in");
+                    }}
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleResetCrop();
+                    }}
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setEditingPanelId(null);
+                      void handleSave();
+                    }}
+                  >
+                    Done
+                  </button>
+                </div>
+              );
+            })()}
             {/* Caption boxes */}
             {page &&
               status !== "loading" &&
@@ -5778,24 +5807,19 @@ function PanelsTab({
                     
                     {isFreeMode && page && (
                       <div className="free-transform-grid">
+                        <p className="free-transform-hint">
+                          Offset each corner in pixels. X: + right, − left. Y: + up, − down.
+                        </p>
                         {["topLeft", "topRight", "bottomLeft", "bottomRight"].map((cornerKey) => {
                           const corner = cornerKey as keyof NonNullable<PanelGeometry["cornerOffsets"]>;
                           const current = selectedPanel.geometry.cornerOffsets?.[corner] ?? { x: 0, y: 0 };
 
+                          // Show offsets in pixels relative to current panel size
+                          // Y is inverted for display: + = up, - = down
                           const panelWidthPx = page.width * selectedPanel.geometry.width;
                           const panelHeightPx = page.height * selectedPanel.geometry.height;
-
-                          // Map stored offsets to "outward" pixels so positive numbers
-                          // always mean pushing the corner outward from the current panel.
-                          const outwardX =
-                            corner === "topLeft" || corner === "bottomLeft" ? -1 : 1;
-                          const outwardY =
-                            corner === "topLeft" || corner === "topRight" ? -1 : 1;
-
-                          const rawPxX = current.x * panelWidthPx * outwardX;
-                          const rawPxY = current.y * panelHeightPx * outwardY;
-                          const pxX = Number.isFinite(rawPxX) ? Math.round(rawPxX) : 0;
-                          const pxY = Number.isFinite(rawPxY) ? Math.round(rawPxY) : 0;
+                          const pxX = Math.round(current.x * panelWidthPx);
+                          const pxY = Math.round(-current.y * panelHeightPx); // Invert for display
 
                           return (
                             <div key={corner} className="corner-controls">
@@ -5821,7 +5845,8 @@ function PanelsTab({
                                     onChange={(e) => {
                                       const next = Number(e.target.value);
                                       if (!Number.isFinite(next)) return;
-                                      handleCornerOffsetChange(corner, "y", next);
+                                      // Invert back when storing: user types +, we store -
+                                      handleCornerOffsetChange(corner, "y", -next);
                                     }}
                                   />
                                 </label>
@@ -5829,6 +5854,20 @@ function PanelsTab({
                             </div>
                           );
                         })}
+                        <button
+                          type="button"
+                          className="ghost"
+                          style={{ gridColumn: "1 / -1", marginTop: "0.5rem" }}
+                          onClick={() => {
+                            if (!selectedPanel) return;
+                            updateGeometry(selectedPanel.id, {
+                              ...selectedPanel.geometry,
+                              cornerOffsets: undefined,
+                            });
+                          }}
+                        >
+                          Reset to Rectangle
+                        </button>
                       </div>
                     )}
 
