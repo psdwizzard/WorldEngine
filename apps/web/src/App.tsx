@@ -51,6 +51,7 @@ import {
   deleteStoryboardPageApi,
   updatePageIssue,
   exportPageToFolder,
+  exportPageToPsd,
 } from "./lib/api";
 import { CaptionBox, FontSelector, SpeechBubble } from "./components";
 import "./App.css";
@@ -4460,6 +4461,8 @@ function PanelsTab({
             imageData: base64Data,
             outputFolder: settings.assetRoot.trim(),
             filename: safeLabel,
+            comicName: settings.projectSlug,
+            issueName: page.issueLabel,
             geminiKey: settings.geminiKey,
             projectSlug: settings.projectSlug,
           });
@@ -4490,6 +4493,45 @@ function PanelsTab({
       URL.revokeObjectURL(url);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to export page");
+      setStatus("error");
+    }
+  }, [page, settings.assetRoot, settings.geminiKey, settings.projectSlug]);
+
+  const handleExportPsd = useCallback(async () => {
+    if (!page) return;
+
+    // PSD export requires an output folder to be configured
+    if (!settings.assetRoot || !settings.assetRoot.trim()) {
+      setError("Set an output folder in Settings to export PSD files.");
+      return;
+    }
+
+    try {
+      setStatus("saving");
+      
+      // Calculate export dimensions (same logic as PNG export)
+      const hasNormalizedSize =
+        page.width > 0 && page.width <= 1 && page.height > 0 && page.height <= 1;
+      const width = Math.round(hasNormalizedSize ? 1988 : page.width || 1988);
+      const height = Math.round(hasNormalizedSize ? 3075 : page.height || 3075);
+
+      const result = await exportPageToPsd({
+        pageId: page.id,
+        outputFolder: settings.assetRoot.trim(),
+        filename: page.label || "page",
+        width,
+        height,
+        comicName: settings.projectSlug,
+        issueName: page.issueLabel,
+        geminiKey: settings.geminiKey,
+        projectSlug: settings.projectSlug,
+      });
+
+      setStatus("saved");
+      setTimeout(() => setStatus("ready"), 2000);
+      console.log(`Exported PSD to: ${result.path} (${result.layerCount} layers)`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to export PSD");
       setStatus("error");
     }
   }, [page, settings.assetRoot, settings.geminiKey, settings.projectSlug]);
@@ -5072,6 +5114,15 @@ function PanelsTab({
                   disabled={!page || status === "loading" || status === "saving" || status === "generating"}
                 >
                   Export Page
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => void handleExportPsd()}
+                  disabled={!page || status === "loading" || status === "saving" || status === "generating" || !settings.assetRoot}
+                  title={settings.assetRoot ? "Export as layered PSD" : "Set output folder in Settings first"}
+                >
+                  Export PSD
                 </button>
                 <button type="button" className="ghost" onClick={handleRefresh} disabled={status === "loading"}>
                   Reload

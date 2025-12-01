@@ -826,6 +826,8 @@ export async function exportPageToFolder(input: {
   imageData: string; // base64 encoded PNG (without the data:image/png;base64, prefix)
   outputFolder: string;
   filename?: string;
+  comicName?: string;
+  issueName?: string;
   geminiKey?: string;
   projectSlug?: string;
 }): Promise<{ status: string; path: string; filename: string }> {
@@ -839,6 +841,8 @@ export async function exportPageToFolder(input: {
       imageData: input.imageData,
       outputFolder: input.outputFolder,
       filename: input.filename,
+      comicName: input.comicName,
+      issueName: input.issueName,
     }),
   });
 
@@ -848,6 +852,45 @@ export async function exportPageToFolder(input: {
   }
 
   return (await response.json()) as { status: string; path: string; filename: string };
+}
+
+/**
+ * Export a page as a layered PSD file to the specified output folder.
+ * Each panel, caption box, and bubble becomes its own layer.
+ */
+export async function exportPageToPsd(input: {
+  pageId: UUID;
+  outputFolder: string;
+  filename?: string;
+  width?: number;
+  height?: number;
+  comicName?: string;
+  issueName?: string;
+  geminiKey?: string;
+  projectSlug?: string;
+}): Promise<{ status: string; path: string; filename: string; version: number; layerCount: number }> {
+  const response = await fetch(resolveUrl(`/panels/pages/${input.pageId}/export-psd`), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeader({ geminiKey: input.geminiKey, projectSlug: input.projectSlug }),
+    },
+    body: JSON.stringify({
+      outputFolder: input.outputFolder,
+      filename: input.filename,
+      width: input.width,
+      height: input.height,
+      comicName: input.comicName,
+      issueName: input.issueName,
+    }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to export PSD");
+  }
+
+  return (await response.json()) as { status: string; path: string; filename: string; version: number; layerCount: number };
 }
 
 export { API_BASE_URL as apiBaseUrl };

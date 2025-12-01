@@ -15,9 +15,86 @@ import {
 import { resolveProjectSlug } from "../lib/projectScope";
 import { getAsset, getAssetBuffer, saveAsset, saveAssetBuffer } from "../services/assetStore";
 import sharp from "sharp";
+import { writePsd, Layer, Psd } from "ag-psd";
 import { loadEnv } from "../lib/env";
 import type { EnvConfig } from "../lib/env";
 import { upload } from "../middleware/upload";
+
+/**
+ * Convert sharp image buffer to imageData format that ag-psd expects.
+ * Returns { width, height, data: Uint8ClampedArray } in RGBA format.
+ */
+async function sharpToImageData(
+  buffer: Buffer,
+  targetWidth?: number,
+  targetHeight?: number
+): Promise<{ width: number; height: number; data: Uint8ClampedArray }> {
+  let pipeline = sharp(buffer);
+  
+  if (targetWidth && targetHeight) {
+    pipeline = pipeline.resize(targetWidth, targetHeight, { fit: "fill" });
+  }
+  
+  const { data, info } = await pipeline
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  
+  return {
+    width: info.width,
+    height: info.height,
+    data: new Uint8ClampedArray(data),
+  };
+}
+
+/**
+ * Create a solid color imageData for backgrounds.
+ */
+function createSolidColorImageData(
+  width: number,
+  height: number,
+  color: { r: number; g: number; b: number; a: number }
+): { width: number; height: number; data: Uint8ClampedArray } {
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    data[i * 4] = color.r;
+    data[i * 4 + 1] = color.g;
+    data[i * 4 + 2] = color.b;
+    data[i * 4 + 3] = color.a;
+  }
+  return { width, height, data };
+}
+
+/**
+ * Parse a CSS color string to RGBA values.
+ */
+function parseColor(color: string): { r: number; g: number; b: number; a: number } {
+  // Default to white
+  let r = 255, g = 255, b = 255, a = 255;
+  
+  if (color.startsWith("#")) {
+    const hex = color.slice(1);
+    if (hex.length === 3) {
+      r = parseInt(hex[0] + hex[0], 16);
+      g = parseInt(hex[1] + hex[1], 16);
+      b = parseInt(hex[2] + hex[2], 16);
+    } else if (hex.length === 6) {
+      r = parseInt(hex.slice(0, 2), 16);
+      g = parseInt(hex.slice(2, 4), 16);
+      b = parseInt(hex.slice(4, 6), 16);
+    }
+  } else if (color.startsWith("rgb")) {
+    const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+    if (match) {
+      r = parseInt(match[1], 10);
+      g = parseInt(match[2], 10);
+      b = parseInt(match[3], 10);
+      a = match[4] ? Math.round(parseFloat(match[4]) * 255) : 255;
+    }
+  }
+  
+  return { r, g, b, a };
+}
 
 const panelPayload = z.object({
   panelId: z.string().uuid().optional(),
@@ -756,6 +833,8 @@ const exportPageSchema = z.object({
   imageData: z.string().min(1), // base64 encoded PNG
   outputFolder: z.string().min(1),
   filename: z.string().optional(),
+  comicName: z.string().optional(), // Override for folder name (defaults to projectSlug)
+  issueName: z.string().optional(), // Override for issue folder (defaults to page.issueLabel)
 });
 
 /**
@@ -781,12 +860,17 @@ panelsRouter.post("/pages/:pageId/export", async (req, res) => {
   }
 
   try {
-    const { outputFolder, imageData, filename } = parsed.data;
+    const { outputFolder, imageData, filename, comicName, issueName } = parsed.data;
     const fs = await import("node:fs/promises");
     const path = await import("node:path");
 
+    // Build organized folder structure: outputFolder/ComicName/IssueName/PNG
+    const safeComicName = (comicName || projectSlug || "Comic").replace(/[^\w.-]+/g, "-");
+    const safeIssueName = (issueName || page.issueLabel || "Issue 01").replace(/[^\w.-]+/g, "-");
+    const exportFolder = path.join(outputFolder, safeComicName, safeIssueName, "PNG");
+
     // Ensure output folder exists
-    await fs.mkdir(outputFolder, { recursive: true });
+    await fs.mkdir(exportFolder, { recursive: true });
 
     // Generate filename from page label if not provided
     const safeLabel = (filename || page.label || "page").replace(/[^\w.-]+/g, "-");
@@ -795,10 +879,10 @@ panelsRouter.post("/pages/:pageId/export", async (req, res) => {
     // Find next available version number
     let version = 1;
     let outputFilename = `${baseFilename}-V${version}.png`;
-    let outputPath = path.join(outputFolder, outputFilename);
+    let outputPath = path.join(exportFolder, outputFilename);
 
     // Check for existing versions and increment
-    const existingFiles = await fs.readdir(outputFolder).catch(() => []);
+    const existingFiles = await fs.readdir(exportFolder).catch(() => []);
     const versionPattern = new RegExp(`^${baseFilename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-V(\\d+)\\.png$`, "i");
     
     for (const file of existingFiles) {
@@ -812,7 +896,7 @@ panelsRouter.post("/pages/:pageId/export", async (req, res) => {
     }
 
     outputFilename = `${baseFilename}-V${version}.png`;
-    outputPath = path.join(outputFolder, outputFilename);
+    outputPath = path.join(exportFolder, outputFilename);
 
     // Decode base64 and write to file
     const buffer = Buffer.from(imageData, "base64");
@@ -829,6 +913,658 @@ panelsRouter.post("/pages/:pageId/export", async (req, res) => {
     res.status(500).json({
       error: "export_failed",
       message: error instanceof Error ? error.message : "Failed to export page",
+    });
+  }
+});
+
+const exportPsdSchema = z.object({
+  pageId: z.string().uuid(),
+  outputFolder: z.string().min(1),
+  filename: z.string().optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  comicName: z.string().optional(), // Override for folder name (defaults to projectSlug)
+  issueName: z.string().optional(), // Override for issue folder (defaults to page.issueLabel)
+});
+
+/**
+ * Export a page as a layered PSD file.
+ * Each panel becomes its own layer, preserving editability in Photoshop.
+ */
+panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
+  const parsed = exportPsdSchema.safeParse({
+    pageId: req.params.pageId,
+    ...req.body,
+  });
+
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid_export_payload", issues: parsed.error.flatten() });
+  }
+
+  const projectSlug = resolveProjectSlug(req);
+  const pages = listStoryboardPages(projectSlug);
+  const page = pages.find((p) => p.id === parsed.data.pageId);
+
+  if (!page) {
+    return res.status(404).json({ error: "page_not_found" });
+  }
+
+  try {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const { outputFolder, filename, comicName, issueName } = parsed.data;
+
+    // Use provided dimensions or fall back to page dimensions or defaults
+    const hasNormalizedSize =
+      page.width > 0 && page.width <= 1 && page.height > 0 && page.height <= 1;
+    const psdWidth = parsed.data.width ?? Math.round(hasNormalizedSize ? 1988 : page.width || 1988);
+    const psdHeight = parsed.data.height ?? Math.round(hasNormalizedSize ? 3075 : page.height || 3075);
+
+    // Build organized folder structure: outputFolder/ComicName/IssueName/PSD
+    const safeComicName = (comicName || projectSlug || "Comic").replace(/[^\w.-]+/g, "-");
+    const safeIssueName = (issueName || page.issueLabel || "Issue 01").replace(/[^\w.-]+/g, "-");
+    const exportFolder = path.join(outputFolder, safeComicName, safeIssueName, "PSD");
+
+    // Ensure output folder exists
+    await fs.mkdir(exportFolder, { recursive: true });
+
+    // Generate filename with versioning
+    const safeLabel = (filename || page.label || "page").replace(/[^\w.-]+/g, "-");
+    const baseFilename = safeLabel.endsWith(".psd") ? safeLabel.slice(0, -4) : safeLabel;
+
+    let version = 1;
+    const existingFiles = await fs.readdir(exportFolder).catch(() => []);
+    const versionPattern = new RegExp(`^${baseFilename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-V(\\d+)\\.psd$`, "i");
+
+    for (const file of existingFiles) {
+      const match = file.match(versionPattern);
+      if (match) {
+        const existingVersion = parseInt(match[1], 10);
+        if (existingVersion >= version) {
+          version = existingVersion + 1;
+        }
+      }
+    }
+
+    const outputFilename = `${baseFilename}-V${version}.psd`;
+    const outputPath = path.join(exportFolder, outputFilename);
+
+    // Build the PSD structure
+    const layers: Layer[] = [];
+
+    // Create background layer
+    const bgColor = parseColor(page.backgroundColor ?? "#ffffff");
+    const backgroundImageData = createSolidColorImageData(psdWidth, psdHeight, bgColor);
+    layers.push({
+      name: "Background",
+      imageData: backgroundImageData,
+      left: 0,
+      top: 0,
+      opacity: 1,
+      blendMode: "normal",
+    });
+
+    // Sort panels by order (lower order = further back)
+    const sortedPanels = [...page.panels].sort((a, b) => a.order - b.order);
+
+    // Create a layer for each panel
+    for (const panel of sortedPanels) {
+      if (!panel.renderAssetId) continue;
+
+      const assetBuffer = await getAssetBuffer(panel.renderAssetId);
+      if (!assetBuffer) continue;
+
+      // Calculate panel position and size in pixels
+      const panelX = Math.round(panel.geometry.x * psdWidth);
+      const panelY = Math.round(panel.geometry.y * psdHeight);
+      const panelW = Math.round(panel.geometry.width * psdWidth);
+      const panelH = Math.round(panel.geometry.height * psdHeight);
+      const rotation = panel.rotation ?? 0;
+
+      try {
+        // Get original image metadata
+        const metadata = await sharp(assetBuffer).metadata();
+        const imgWidth = metadata.width ?? panelW;
+        const imgHeight = metadata.height ?? panelH;
+
+        // Calculate how the image fits in the panel (same logic as frontend)
+        const imageAspect = imgWidth / imgHeight || 1;
+        const panelAspect = panelW / panelH || 1;
+        const containScale = panelAspect > imageAspect 
+          ? panelH / imgHeight 
+          : panelW / imgWidth;
+
+        const scale = (panel.renderScale ?? 1) * containScale;
+        const offsetX = panel.renderOffsetX ?? 0;
+        const offsetY = panel.renderOffsetY ?? 0;
+
+        // Calculate final image dimensions
+        const drawW = Math.round(imgWidth * scale);
+        const drawH = Math.round(imgHeight * scale);
+
+        // Calculate image position (centered in panel + offsets)
+        const centerX = panelX + panelW / 2;
+        const centerY = panelY + panelH / 2;
+
+        // Build sharp pipeline with rotation if needed
+        let pipeline = sharp(assetBuffer).resize(drawW, drawH, { fit: "fill" });
+        
+        // Apply rotation if present
+        let finalWidth = drawW;
+        let finalHeight = drawH;
+        if (rotation !== 0) {
+          // Rotate the image - sharp rotates around center
+          pipeline = pipeline.rotate(rotation, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
+          
+          // Calculate the bounding box after rotation
+          const radians = (Math.abs(rotation) * Math.PI) / 180;
+          const cos = Math.cos(radians);
+          const sin = Math.sin(radians);
+          finalWidth = Math.ceil(Math.abs(drawW * cos) + Math.abs(drawH * sin));
+          finalHeight = Math.ceil(Math.abs(drawW * sin) + Math.abs(drawH * cos));
+        }
+
+        const resizedBuffer = await pipeline.ensureAlpha().png().toBuffer();
+        
+        // Get actual dimensions after rotation
+        const finalMetadata = await sharp(resizedBuffer).metadata();
+        const actualWidth = finalMetadata.width ?? finalWidth;
+        const actualHeight = finalMetadata.height ?? finalHeight;
+
+        const imageData = await sharpToImageData(resizedBuffer);
+
+        // Position accounting for rotation expansion
+        const imgLeft = Math.round(centerX + offsetX * panelW - actualWidth / 2);
+        const imgTop = Math.round(centerY + offsetY * panelH - actualHeight / 2);
+
+        // Create the panel layer
+        const panelLayer: Layer = {
+          name: panel.label || `Panel ${panel.order + 1}`,
+          imageData,
+          left: imgLeft,
+          top: imgTop,
+          opacity: 1,
+          blendMode: "normal",
+        };
+
+        layers.push(panelLayer);
+
+        // Add stroke as a separate layer if present
+        // Note: strokeWidth is in export pixels, not UI pixels
+        if (panel.strokeWidth && panel.strokeWidth > 0) {
+          const strokeColor = panel.strokeColor ?? "#000000";
+          // The strokeWidth from the panel is already in "export" scale since it's stored as-is
+          const sw = panel.strokeWidth;
+          const offsets = panel.geometry.cornerOffsets;
+
+          // Create stroke SVG - stroke is drawn ON the panel boundary
+          let strokeSvg: string;
+          if (offsets) {
+            // Custom shape with corner offsets
+            // Offsets are fractions of panel size, corners start at panel edges
+            const tl = { 
+              x: (offsets.topLeft?.x ?? 0) * panelW, 
+              y: (offsets.topLeft?.y ?? 0) * panelH 
+            };
+            const tr = { 
+              x: panelW + (offsets.topRight?.x ?? 0) * panelW, 
+              y: (offsets.topRight?.y ?? 0) * panelH 
+            };
+            const br = { 
+              x: panelW + (offsets.bottomRight?.x ?? 0) * panelW, 
+              y: panelH + (offsets.bottomRight?.y ?? 0) * panelH 
+            };
+            const bl = { 
+              x: (offsets.bottomLeft?.x ?? 0) * panelW, 
+              y: panelH + (offsets.bottomLeft?.y ?? 0) * panelH 
+            };
+            strokeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${panelW}" height="${panelH}" viewBox="0 0 ${panelW} ${panelH}">
+              <polygon points="${tl.x},${tl.y} ${tr.x},${tr.y} ${br.x},${br.y} ${bl.x},${bl.y}" fill="none" stroke="${strokeColor}" stroke-width="${sw}" stroke-linejoin="miter"/>
+            </svg>`;
+          } else {
+            // Simple rectangle stroke - centered on the panel edge
+            strokeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${panelW}" height="${panelH}" viewBox="0 0 ${panelW} ${panelH}">
+              <rect x="${sw / 2}" y="${sw / 2}" width="${panelW - sw}" height="${panelH - sw}" fill="none" stroke="${strokeColor}" stroke-width="${sw}"/>
+            </svg>`;
+          }
+
+          try {
+            const strokeBuffer = await sharp(Buffer.from(strokeSvg)).png().toBuffer();
+            const strokeImageData = await sharpToImageData(strokeBuffer);
+
+            layers.push({
+              name: `${panel.label || `Panel ${panel.order + 1}`} - Stroke`,
+              imageData: strokeImageData,
+              left: panelX,
+              top: panelY,
+              opacity: 1,
+              blendMode: "normal",
+            });
+          } catch (strokeError) {
+            console.warn("Failed to create stroke layer:", strokeError);
+          }
+        }
+      } catch (panelError) {
+        console.warn(`Failed to process panel ${panel.id}:`, panelError);
+      }
+    }
+
+    // Create caption box layers
+    // Scale factor for fonts/strokes: UI preview ~500px, export ~2000px
+    const uiPreviewWidth = 500;
+    const exportScale = psdWidth / uiPreviewWidth;
+
+    const captionBoxes = page.captionBoxes ?? [];
+    for (const caption of captionBoxes) {
+      const capX = Math.round(caption.geometry.x * psdWidth);
+      const capY = Math.round(caption.geometry.y * psdHeight);
+      const capW = Math.round(caption.geometry.width * psdWidth);
+      const capH = Math.round(caption.geometry.height * psdHeight);
+
+      const fill = caption.fill ?? "#f5f5f0";
+      const stroke = caption.stroke ?? "#1a1a1a";
+      const sw = Math.max(1, Math.round((caption.strokeWidth ?? 2) * exportScale));
+      const shadowOff = Math.round((caption.shadowOffset ?? 3) * exportScale);
+      const shadowColor = caption.shadowColor ?? "#1a1a1a";
+
+      try {
+        // Generate rough edge points (matching frontend CaptionBox rendering)
+        const seededRandom = (seed: number) => {
+          const x = Math.sin(seed) * 10000;
+          return x - Math.floor(x);
+        };
+
+        const generateRoughPoints = (
+          startX: number, startY: number, endX: number, endY: number,
+          segments: number, roughness: number, seed: number, isHorizontal: boolean
+        ): Array<{ x: number; y: number }> => {
+          const points: Array<{ x: number; y: number }> = [];
+          const dx = (endX - startX) / segments;
+          const dy = (endY - startY) / segments;
+          const perpX = isHorizontal ? 0 : 1;
+          const perpY = isHorizontal ? 1 : 0;
+          const maxOffset = 2.5 * roughness * exportScale;
+
+          for (let i = 0; i <= segments; i++) {
+            const baseX = startX + dx * i;
+            const baseY = startY + dy * i;
+            const edgeFactor = i === 0 || i === segments ? 0.2 : 1;
+            const offsetSeed = seed + i * 137.5 + (isHorizontal ? 0 : 1000);
+            const randomOffset = (seededRandom(offsetSeed) - 0.5) * 2 * maxOffset * edgeFactor;
+            const tearSeed = seed + i * 73.1 + (isHorizontal ? 2000 : 3000);
+            const hasTear = seededRandom(tearSeed) > 0.92;
+            const tearAmount = hasTear ? (seededRandom(tearSeed + 1) - 0.5) * maxOffset * 2.5 : 0;
+            points.push({
+              x: baseX + perpX * (randomOffset + tearAmount),
+              y: baseY + perpY * (randomOffset + tearAmount),
+            });
+          }
+          return points;
+        };
+
+        const edgeDetail = 24;
+        const roughness = caption.roughness ?? 0.7;
+        const seed = caption.seed ?? 0;
+        
+        // Extra padding for rough points that go outside the box bounds
+        const roughPadding = Math.ceil(2.5 * roughness * exportScale * 3); // Max possible offset
+
+        // Generate rough edges for all 4 sides (offset by roughPadding to keep in positive space)
+        const topEdge = generateRoughPoints(roughPadding, roughPadding, capW + roughPadding, roughPadding, edgeDetail, roughness, seed, true);
+        const rightEdge = generateRoughPoints(capW + roughPadding, roughPadding, capW + roughPadding, capH + roughPadding, edgeDetail, roughness, seed + 100, false);
+        const bottomEdge = generateRoughPoints(capW + roughPadding, capH + roughPadding, roughPadding, capH + roughPadding, edgeDetail, roughness, seed + 200, true);
+        const leftEdge = generateRoughPoints(roughPadding, capH + roughPadding, roughPadding, roughPadding, edgeDetail, roughness, seed + 300, false);
+
+        const allPoints = [...topEdge, ...rightEdge.slice(1), ...bottomEdge.slice(1), ...leftEdge.slice(1)];
+        const pathPoints = allPoints.map(p => `${p.x},${p.y}`).join(" ");
+
+        // Shadow points (offset from main box)
+        const shadowPoints = allPoints.map(p => `${p.x + shadowOff},${p.y + shadowOff}`).join(" ");
+
+        // Canvas needs to be larger to fit roughness padding + shadow + stroke
+        const canvasW = capW + roughPadding * 2 + shadowOff + sw;
+        const canvasH = capH + roughPadding * 2 + shadowOff + sw;
+        
+        // Build SVG with rough polygon shape
+        let captionSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvasW}" height="${canvasH}">`;
+        
+        // Shadow polygon (offset to bottom-right)
+        if (shadowOff > 0) {
+          captionSvg += `<polygon points="${shadowPoints}" fill="${shadowColor}" opacity="0.9"/>`;
+        }
+        
+        // Main caption box polygon with stroke
+        captionSvg += `<polygon points="${pathPoints}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"/>`;
+        captionSvg += `</svg>`;
+
+        const captionBuffer = await sharp(Buffer.from(captionSvg)).png().toBuffer();
+        const captionImageData = await sharpToImageData(captionBuffer);
+
+        layers.push({
+          name: `Caption Box: ${(caption.text || "").slice(0, 20)}`,
+          imageData: captionImageData,
+          left: capX - roughPadding,
+          top: capY - roughPadding,
+          opacity: 1,
+          blendMode: "normal",
+        });
+
+        // Add text layer
+        if (caption.text) {
+          const baseFontSizePx = (caption.fontSize ?? 0.7) * 16;
+          const fontSize = Math.max(12, Math.round(baseFontSizePx * exportScale));
+          const fontFamily = caption.fontFamily ?? "Courier New, monospace";
+          const lineHeight = Math.round(fontSize * 1.3);
+          const padX = Math.round(0.6 * 16 * exportScale);
+          const padY = Math.round(0.5 * 16 * exportScale);
+          const maxW = capW - padX * 2;
+
+          // Word wrap
+          const charsPerLine = Math.max(5, Math.floor(maxW / (fontSize * 0.6)));
+          const words = caption.text.split(/\s+/);
+          const lines: string[] = [];
+          let line = "";
+          for (const w of words) {
+            const test = line ? `${line} ${w}` : w;
+            if (test.length > charsPerLine && line) {
+              lines.push(line);
+              line = w;
+            } else {
+              line = test;
+            }
+          }
+          if (line) lines.push(line);
+
+          const tspans = lines.map((l, i) => {
+            const y = padY + fontSize + i * lineHeight;
+            const escaped = l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            return `<tspan x="${padX}" y="${y}">${escaped}</tspan>`;
+          }).join("");
+
+          const textSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${capW}" height="${capH}">
+            <text font-family="${fontFamily}" font-size="${fontSize}" fill="#1a1a1a">${tspans}</text>
+          </svg>`;
+
+          try {
+            const textBuffer = await sharp(Buffer.from(textSvg)).png().toBuffer();
+            const textImageData = await sharpToImageData(textBuffer);
+            layers.push({
+              name: `Caption Text`,
+              imageData: textImageData,
+              left: capX,
+              top: capY,
+              opacity: 1,
+              blendMode: "normal",
+            });
+          } catch (textErr) {
+            console.warn("Caption text failed:", textErr);
+          }
+        }
+      } catch (captionErr) {
+        console.warn("Caption layer failed:", captionErr);
+      }
+    }
+
+    // Create speech/thought bubble layers
+    // All coordinates calculated directly in pixel space (no viewBox scaling)
+    const bubbles = page.bubbles ?? [];
+    for (const bubble of bubbles) {
+      const bubX = Math.round(bubble.geometry.x * psdWidth);
+      const bubY = Math.round(bubble.geometry.y * psdHeight);
+      const bubW = Math.round(bubble.geometry.width * psdWidth);
+      const bubH = Math.round(bubble.geometry.height * psdHeight);
+
+      const fill = bubble.fill ?? "#ffffff";
+      const stroke = bubble.stroke ?? "#000000";
+      const sw = Math.max(1, Math.round((bubble.strokeWidth ?? 2) * exportScale));
+      const tailAngle = bubble.tailAngle ?? 240;
+      const tailLength = bubble.tailLength ?? 0.3;
+
+      // Calculate bubble geometry in actual pixels
+      // Leave room for tail: ellipse is in upper portion
+      const padding = bubW * 0.04;
+      const cx = bubW / 2;
+      const cy = bubH * (0.5 - tailLength * 0.15); // Shift up based on tail
+      const rx = bubW / 2 - padding;
+      const ry = bubH * (0.5 - tailLength * 0.15) - padding;
+
+      let bubbleSvg: string;
+
+      if (bubble.type === "thought") {
+        // Thought bubble: main ellipse + 3 trailing circles
+        // Use expanded canvas that can fit circles in any direction
+        const angleRad = (tailAngle * Math.PI) / 180;
+        const cosA = Math.cos(angleRad);
+        const sinA = Math.sin(angleRad);
+        
+        // Make canvas 50% larger to accommodate circles in any direction
+        const canvasW = Math.round(bubW * 1.5);
+        const canvasH = Math.round(bubH * 1.5);
+        const canvasCx = canvasW / 2;
+        const canvasCy = canvasH / 2;
+        
+        // Ellipse centered in expanded canvas
+        const ellipseRx = bubW * 0.4;
+        const ellipseRy = bubH * 0.35;
+        
+        // Trailing circles
+        const tailLen = Math.max(bubW, bubH) * tailLength * 0.8;
+        const c1Dist = ellipseRx + tailLen * 0.3;
+        const c2Dist = ellipseRx + tailLen * 0.55;
+        const c3Dist = ellipseRx + tailLen * 0.8;
+        const c1R = bubW * 0.055;
+        const c2R = bubW * 0.04;
+        const c3R = bubW * 0.025;
+
+        const c1X = canvasCx + c1Dist * cosA;
+        const c1Y = canvasCy + c1Dist * sinA;
+        const c2X = canvasCx + c2Dist * cosA;
+        const c2Y = canvasCy + c2Dist * sinA;
+        const c3X = canvasCx + c3Dist * cosA;
+        const c3Y = canvasCy + c3Dist * sinA;
+
+        bubbleSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvasW}" height="${canvasH}">
+          <ellipse cx="${canvasCx}" cy="${canvasCy}" rx="${ellipseRx}" ry="${ellipseRy}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>
+          <circle cx="${c1X}" cy="${c1Y}" r="${c1R}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>
+          <circle cx="${c2X}" cy="${c2Y}" r="${c2R}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>
+          <circle cx="${c3X}" cy="${c3Y}" r="${c3R}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>
+        </svg>`;
+
+        try {
+          const bubbleBuffer = await sharp(Buffer.from(bubbleSvg)).png().toBuffer();
+          const bubbleImageData = await sharpToImageData(bubbleBuffer);
+
+          // Center the expanded canvas on the original bubble position
+          const layerLeft = bubX - Math.round((canvasW - bubW) / 2);
+          const layerTop = bubY - Math.round((canvasH - bubH) / 2);
+
+          layers.push({
+            name: `Thought Bubble`,
+            imageData: bubbleImageData,
+            left: layerLeft,
+            top: layerTop,
+            opacity: 1,
+            blendMode: "normal",
+          });
+
+          // Add thought bubble text
+          if (bubble.text) {
+            const fontSize = Math.max(12, Math.round((bubble.fontSize ?? 0.85) * 16 * exportScale));
+            const fontFamily = bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif";
+            const lineHeight = Math.round(fontSize * 1.2);
+            const textW = ellipseRx * 1.5;
+            const charsPerLine = Math.max(3, Math.floor(textW / (fontSize * 0.55)));
+            
+            const words = bubble.text.split(/\s+/);
+            const lines: string[] = [];
+            let line = "";
+            for (const w of words) {
+              const test = line ? `${line} ${w}` : w;
+              if (test.length > charsPerLine && line) {
+                lines.push(line);
+                line = w;
+              } else {
+                line = test;
+              }
+            }
+            if (line) lines.push(line);
+
+            const totalH = lines.length * lineHeight;
+            const textCenterY = bubH / 2;
+            const startY = textCenterY - totalH / 2 + fontSize * 0.8;
+
+            const tspans = lines.map((l, i) => {
+              const y = startY + i * lineHeight;
+              const escaped = l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+              return `<tspan x="${bubW / 2}" y="${y}" text-anchor="middle">${escaped}</tspan>`;
+            }).join("");
+
+            const textSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${bubW}" height="${bubH}">
+              <text font-family="${fontFamily}" font-size="${fontSize}" fill="#000000">${tspans}</text>
+            </svg>`;
+
+            try {
+              const textBuffer = await sharp(Buffer.from(textSvg)).png().toBuffer();
+              const textImageData = await sharpToImageData(textBuffer);
+              layers.push({
+                name: `Thought Text`,
+                imageData: textImageData,
+                left: bubX,
+                top: bubY,
+                opacity: 1,
+                blendMode: "normal",
+              });
+            } catch (textErr) {
+              console.warn("Thought text failed:", textErr);
+            }
+          }
+        } catch (bubbleErr) {
+          console.warn("Thought bubble failed:", bubbleErr);
+        }
+        continue;
+      } else {
+        // Speech bubble: ellipse with pointed tail
+        const angleRad = (tailAngle * Math.PI) / 180;
+        const tailSpread = 15 * Math.PI / 180; // 15 degrees spread
+        const tailLen = tailLength * bubH * 0.6;
+
+        // Points where tail connects to ellipse
+        const base1X = cx + rx * Math.cos(angleRad - tailSpread);
+        const base1Y = cy + ry * Math.sin(angleRad - tailSpread);
+        const base2X = cx + rx * Math.cos(angleRad + tailSpread);
+        const base2Y = cy + ry * Math.sin(angleRad + tailSpread);
+        
+        // Tail tip
+        const tipX = cx + (rx + tailLen) * Math.cos(angleRad);
+        const tipY = cy + (ry + tailLen) * Math.sin(angleRad);
+
+        // SVG path: arc around most of ellipse, then tail triangle
+        const largeArc = 1; // Go the long way around
+        const sweep = 0; // Counter-clockwise
+        
+        bubbleSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${bubW}" height="${bubH}">
+          <path d="M ${base1X} ${base1Y} A ${rx} ${ry} 0 ${largeArc} ${sweep} ${base2X} ${base2Y} L ${tipX} ${tipY} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"/>
+        </svg>`;
+      }
+
+      // This block only runs for speech bubbles (thought bubbles continue above)
+      try {
+        const bubbleBuffer = await sharp(Buffer.from(bubbleSvg)).png().toBuffer();
+        const bubbleImageData = await sharpToImageData(bubbleBuffer);
+
+        layers.push({
+          name: "Speech Bubble",
+          imageData: bubbleImageData,
+          left: bubX,
+          top: bubY,
+          opacity: 1,
+          blendMode: "normal",
+        });
+
+        // Add bubble text layer
+        if (bubble.text) {
+          const fontSize = Math.max(12, Math.round((bubble.fontSize ?? 0.85) * 16 * exportScale));
+          const fontFamily = bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif";
+          const lineHeight = Math.round(fontSize * 1.2);
+
+          // Text area
+          const textW = rx * 1.4;
+          const charsPerLine = Math.max(3, Math.floor(textW / (fontSize * 0.55)));
+          
+          const words = bubble.text.split(/\s+/);
+          const lines: string[] = [];
+          let line = "";
+          for (const w of words) {
+            const test = line ? `${line} ${w}` : w;
+            if (test.length > charsPerLine && line) {
+              lines.push(line);
+              line = w;
+            } else {
+              line = test;
+            }
+          }
+          if (line) lines.push(line);
+
+          // Center text vertically in ellipse
+          const totalH = lines.length * lineHeight;
+          const startY = cy - totalH / 2 + fontSize * 0.8;
+
+          const tspans = lines.map((l, i) => {
+            const y = startY + i * lineHeight;
+            const escaped = l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            return `<tspan x="${cx}" y="${y}" text-anchor="middle">${escaped}</tspan>`;
+          }).join("");
+
+          const textSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${bubW}" height="${bubH}">
+            <text font-family="${fontFamily}" font-size="${fontSize}" fill="#000000">${tspans}</text>
+          </svg>`;
+
+          try {
+            const textBuffer = await sharp(Buffer.from(textSvg)).png().toBuffer();
+            const textImageData = await sharpToImageData(textBuffer);
+            layers.push({
+              name: `Bubble Text`,
+              imageData: textImageData,
+              left: bubX,
+              top: bubY,
+              opacity: 1,
+              blendMode: "normal",
+            });
+          } catch (textErr) {
+            console.warn("Bubble text failed:", textErr);
+          }
+        }
+      } catch (bubbleErr) {
+        console.warn("Bubble layer failed:", bubbleErr);
+      }
+    }
+
+    // Build the PSD document
+    const psd: Psd = {
+      width: psdWidth,
+      height: psdHeight,
+      channels: 4,
+      bitsPerChannel: 8,
+      colorMode: 3, // RGB
+      children: layers,
+    };
+
+    // Write the PSD file
+    const psdBuffer = writePsd(psd);
+    await fs.writeFile(outputPath, Buffer.from(psdBuffer));
+
+    res.json({
+      status: "exported",
+      path: outputPath,
+      filename: outputFilename,
+      version,
+      layerCount: layers.length,
+    });
+  } catch (error) {
+    console.error("panels:export_psd_failed", error);
+    res.status(500).json({
+      error: "export_psd_failed",
+      message: error instanceof Error ? error.message : "Failed to export PSD",
     });
   }
 });
