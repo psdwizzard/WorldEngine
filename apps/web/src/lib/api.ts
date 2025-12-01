@@ -817,5 +817,38 @@ export async function updateProject(
   return payload.project;
 }
 
+/**
+ * Export a rendered page to the specified output folder on disk.
+ * This saves the image directly to the filesystem instead of downloading.
+ */
+export async function exportPageToFolder(input: {
+  pageId: UUID;
+  imageData: string; // base64 encoded PNG (without the data:image/png;base64, prefix)
+  outputFolder: string;
+  filename?: string;
+  geminiKey?: string;
+  projectSlug?: string;
+}): Promise<{ status: string; path: string; filename: string }> {
+  const response = await fetch(resolveUrl(`/panels/pages/${input.pageId}/export`), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeader({ geminiKey: input.geminiKey, projectSlug: input.projectSlug }),
+    },
+    body: JSON.stringify({
+      imageData: input.imageData,
+      outputFolder: input.outputFolder,
+      filename: input.filename,
+    }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to export page");
+  }
+
+  return (await response.json()) as { status: string; path: string; filename: string };
+}
+
 export { API_BASE_URL as apiBaseUrl };
 

@@ -50,6 +50,7 @@ import {
   activateStoryboardPage,
   deleteStoryboardPageApi,
   updatePageIssue,
+  exportPageToFolder,
 } from "./lib/api";
 import { CaptionBox, FontSelector, SpeechBubble } from "./components";
 import "./App.css";
@@ -4448,6 +4449,32 @@ function PanelsTab({
         ctx.restore();
       }
 
+      const safeLabel = (page.label || "page").replace(/[^\w.-]+/g, "-");
+
+      // If output folder is configured, save directly to disk via API
+      if (settings.assetRoot && settings.assetRoot.trim()) {
+        const base64Data = canvas.toDataURL("image/png").replace(/^data:image\/png;base64,/, "");
+        try {
+          const result = await exportPageToFolder({
+            pageId: page.id,
+            imageData: base64Data,
+            outputFolder: settings.assetRoot.trim(),
+            filename: safeLabel,
+            geminiKey: settings.geminiKey,
+            projectSlug: settings.projectSlug,
+          });
+          setStatus("saved");
+          // Briefly show success, then reset
+          setTimeout(() => setStatus("ready"), 2000);
+          console.log(`Exported to: ${result.path}`);
+        } catch (exportError) {
+          setError(exportError instanceof Error ? exportError.message : "Failed to export page");
+          setStatus("error");
+        }
+        return;
+      }
+
+      // Fallback to browser download if no output folder configured
       const blob = await new Promise<Blob | null>((resolve) => {
         canvas.toBlob((result) => resolve(result), "image/png", 1);
       });
@@ -4456,7 +4483,6 @@ function PanelsTab({
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      const safeLabel = (page.label || "page").replace(/[^\w.-]+/g, "-");
       link.download = `${safeLabel}.png`;
       document.body.appendChild(link);
       link.click();
@@ -4466,7 +4492,7 @@ function PanelsTab({
       setError(cause instanceof Error ? cause.message : "Failed to export page");
       setStatus("error");
     }
-  }, [page]);
+  }, [page, settings.assetRoot, settings.geminiKey, settings.projectSlug]);
 
   const handleRenderSelectedPanel = useCallback(async (model: PanelRenderModel = "nano-banana") => {
     if (!selectedPanel || !selectedPanel.prompt || selectedPanel.prompt.trim().length === 0) {

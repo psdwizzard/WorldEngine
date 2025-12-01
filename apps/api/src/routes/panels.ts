@@ -148,6 +148,10 @@ const editPanelSchema = z.object({
   outputDimensions: renderDimensionsSchema.optional(),
 });
 
+// Default model mappings for panel render options
+const NANO_BANANA_DEFAULT = "gemini-2.5-flash-image";
+const NANO_BANANA_PRO_DEFAULT = "gemini-3-pro-image-preview";
+
 function resolvePanelRenderModel(
   requested: PanelRenderModel | undefined,
   env: EnvConfig,
@@ -156,15 +160,12 @@ function resolvePanelRenderModel(
   const model = requested ?? DEFAULT_PANEL_RENDER_MODEL;
 
   if (model === "nano-banana") {
-    return env.NANO_BANANA_MODEL ?? fallbackModel;
+    return env.NANO_BANANA_MODEL ?? NANO_BANANA_DEFAULT;
   }
 
   if (model === "nano-banana-pro") {
-    const resolved = env.NANO_BANANA_PRO_MODEL ?? env.NANO_BANANA_MODEL ?? fallbackModel;
-    if (!env.NANO_BANANA_PRO_MODEL && !env.NANO_BANANA_MODEL) {
-      console.warn("panels:pro_model_fallback", { resolved });
-    }
-    return resolved;
+    // Use gemini-3-pro-image-preview for Pro by default
+    return env.NANO_BANANA_PRO_MODEL ?? NANO_BANANA_PRO_DEFAULT;
   }
 
   return fallbackModel;
@@ -748,4 +749,86 @@ panelsRouter.patch("/pages/:pageId/issue", async (req, res) => {
 
   const savedPage = await saveStoryboardPage(projectSlug, updatedPage);
   res.json({ page: savedPage });
+});
+
+const exportPageSchema = z.object({
+  pageId: z.string().uuid(),
+  imageData: z.string().min(1), // base64 encoded PNG
+  outputFolder: z.string().min(1),
+  filename: z.string().optional(),
+});
+
+/**
+ * Export a rendered page image to the specified output folder.
+ * This allows saving directly to disk instead of downloading.
+ */
+panelsRouter.post("/pages/:pageId/export", async (req, res) => {
+  const parsed = exportPageSchema.safeParse({
+    pageId: req.params.pageId,
+    ...req.body,
+  });
+
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid_export_payload", issues: parsed.error.flatten() });
+  }
+
+  const projectSlug = resolveProjectSlug(req);
+  const pages = listStoryboardPages(projectSlug);
+  const page = pages.find((p) => p.id === parsed.data.pageId);
+
+  if (!page) {
+    return res.status(404).json({ error: "page_not_found" });
+  }
+
+  try {
+    const { outputFolder, imageData, filename } = parsed.data;
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+
+    // Ensure output folder exists
+    await fs.mkdir(outputFolder, { recursive: true });
+
+    // Generate filename from page label if not provided
+    const safeLabel = (filename || page.label || "page").replace(/[^\w.-]+/g, "-");
+    const baseFilename = safeLabel.endsWith(".png") ? safeLabel.slice(0, -4) : safeLabel;
+
+    // Find next available version number
+    let version = 1;
+    let outputFilename = `${baseFilename}-V${version}.png`;
+    let outputPath = path.join(outputFolder, outputFilename);
+
+    // Check for existing versions and increment
+    const existingFiles = await fs.readdir(outputFolder).catch(() => []);
+    const versionPattern = new RegExp(`^${baseFilename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-V(\\d+)\\.png$`, "i");
+    
+    for (const file of existingFiles) {
+      const match = file.match(versionPattern);
+      if (match) {
+        const existingVersion = parseInt(match[1], 10);
+        if (existingVersion >= version) {
+          version = existingVersion + 1;
+        }
+      }
+    }
+
+    outputFilename = `${baseFilename}-V${version}.png`;
+    outputPath = path.join(outputFolder, outputFilename);
+
+    // Decode base64 and write to file
+    const buffer = Buffer.from(imageData, "base64");
+    await fs.writeFile(outputPath, buffer);
+
+    res.json({
+      status: "exported",
+      path: outputPath,
+      filename: outputFilename,
+      version,
+    });
+  } catch (error) {
+    console.error("panels:export_failed", error);
+    res.status(500).json({
+      error: "export_failed",
+      message: error instanceof Error ? error.message : "Failed to export page",
+    });
+  }
 });
