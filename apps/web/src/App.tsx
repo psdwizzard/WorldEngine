@@ -4375,25 +4375,46 @@ function PanelsTab({
         const childEdgeX = childCenterX - childRx * 0.8 * Math.cos(angle);
         const childEdgeY = childCenterY - childRy * 0.8 * Math.sin(angle);
 
-        // Draw connector line - outer stroke
+        // Calculate control point for curve
+        const midX = (parentEdgeX + childEdgeX) / 2;
+        const midY = (parentEdgeY + childEdgeY) / 2;
+        const perpX = -(childEdgeY - parentEdgeY) * 0.3;
+        const perpY = (childEdgeX - parentEdgeX) * 0.3;
+        const ctrlX = midX + perpX;
+        const ctrlY = midY + perpY;
+
+        // Draw curved connector - outer stroke
         ctx.save();
         ctx.beginPath();
         ctx.moveTo(parentEdgeX, parentEdgeY);
-        ctx.lineTo(childEdgeX, childEdgeY);
+        ctx.quadraticCurveTo(ctrlX, ctrlY, childEdgeX, childEdgeY);
         ctx.strokeStyle = bubble.stroke;
-        ctx.lineWidth = 8 * exportScaleX;
+        ctx.lineWidth = 6 * exportScaleX;
         ctx.lineCap = "round";
         ctx.stroke();
         ctx.restore();
 
-        // Draw connector line - inner fill
+        // Draw curved connector - inner fill
         ctx.save();
         ctx.beginPath();
         ctx.moveTo(parentEdgeX, parentEdgeY);
-        ctx.lineTo(childEdgeX, childEdgeY);
+        ctx.quadraticCurveTo(ctrlX, ctrlY, childEdgeX, childEdgeY);
         ctx.strokeStyle = bubble.fill;
-        ctx.lineWidth = 5 * exportScaleX;
+        ctx.lineWidth = 4 * exportScaleX;
         ctx.lineCap = "round";
+        ctx.stroke();
+        ctx.restore();
+
+        // Draw bulge at child bubble connection point
+        const bulgeRx = width * 0.015;
+        const bulgeRy = height * 0.01;
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(childEdgeX, childEdgeY, bulgeRx, bulgeRy, 0, 0, Math.PI * 2);
+        ctx.fillStyle = bubble.fill;
+        ctx.fill();
+        ctx.strokeStyle = bubble.stroke;
+        ctx.lineWidth = 2 * exportScaleX;
         ctx.stroke();
         ctx.restore();
       }
@@ -5632,26 +5653,50 @@ function PanelsTab({
 
                     return (
                       <g key={`connector-${bubble.id}`}>
-                        {/* Connector line - outer stroke */}
-                        <line
-                          x1={`${parentEdgeX}%`}
-                          y1={`${parentEdgeY}%`}
-                          x2={`${childEdgeX}%`}
-                          y2={`${childEdgeY}%`}
-                          stroke={bubble.stroke}
-                          strokeWidth={8}
-                          strokeLinecap="round"
-                        />
-                        {/* Connector line - inner fill */}
-                        <line
-                          x1={`${parentEdgeX}%`}
-                          y1={`${parentEdgeY}%`}
-                          x2={`${childEdgeX}%`}
-                          y2={`${childEdgeY}%`}
-                          stroke={bubble.fill}
-                          strokeWidth={5}
-                          strokeLinecap="round"
-                        />
+                        {/* Calculate control point for curve - offset perpendicular to the line */}
+                        {(() => {
+                          const midX = (parentEdgeX + childEdgeX) / 2;
+                          const midY = (parentEdgeY + childEdgeY) / 2;
+                          // Perpendicular offset for curve (makes it bulge)
+                          const perpX = -(childEdgeY - parentEdgeY) * 0.3;
+                          const perpY = (childEdgeX - parentEdgeX) * 0.3;
+                          const ctrlX = midX + perpX;
+                          const ctrlY = midY + perpY;
+                          
+                          // Curved path
+                          const curvePath = `M ${parentEdgeX}% ${parentEdgeY}% Q ${ctrlX}% ${ctrlY}% ${childEdgeX}% ${childEdgeY}%`;
+                          
+                          return (
+                            <>
+                              {/* Curved connector - outer stroke */}
+                              <path
+                                d={curvePath}
+                                fill="none"
+                                stroke={bubble.stroke}
+                                strokeWidth={6}
+                                strokeLinecap="round"
+                              />
+                              {/* Curved connector - inner fill */}
+                              <path
+                                d={curvePath}
+                                fill="none"
+                                stroke={bubble.fill}
+                                strokeWidth={4}
+                                strokeLinecap="round"
+                              />
+                              {/* Bulge at child bubble connection point */}
+                              <ellipse
+                                cx={`${childEdgeX}%`}
+                                cy={`${childEdgeY}%`}
+                                rx="1.5%"
+                                ry="1%"
+                                fill={bubble.fill}
+                                stroke={bubble.stroke}
+                                strokeWidth={2}
+                              />
+                            </>
+                          );
+                        })()}
                       </g>
                     );
                   })}
