@@ -3262,9 +3262,16 @@ function PanelsTab({
         }
         return current;
       });
+      // Only update panel selection if no bubble or caption is currently selected
+      // This prevents the selection from jumping away when auto-save runs
       setSelectedPanelId((current) => {
         if (current && layout.panels.some((panel) => panel.id === current)) {
           return current;
+        }
+        // Don't auto-select a panel if we don't have one selected
+        // (user might have a bubble or caption selected instead)
+        if (current === null) {
+          return null;
         }
         return layout.panels[0]?.id ?? null;
       });
@@ -4368,25 +4375,24 @@ function PanelsTab({
         const childEdgeX = childCenterX - childRx * 0.8 * Math.cos(angle);
         const childEdgeY = childCenterY - childRy * 0.8 * Math.sin(angle);
 
-        // Draw connector line with stroke
-        const strokeW = Math.max(2, bubble.strokeWidth) * exportScaleX;
+        // Draw connector line - outer stroke
         ctx.save();
         ctx.beginPath();
         ctx.moveTo(parentEdgeX, parentEdgeY);
         ctx.lineTo(childEdgeX, childEdgeY);
         ctx.strokeStyle = bubble.stroke;
-        ctx.lineWidth = strokeW;
+        ctx.lineWidth = 8 * exportScaleX;
         ctx.lineCap = "round";
         ctx.stroke();
         ctx.restore();
 
-        // Draw inner fill line
+        // Draw connector line - inner fill
         ctx.save();
         ctx.beginPath();
         ctx.moveTo(parentEdgeX, parentEdgeY);
         ctx.lineTo(childEdgeX, childEdgeY);
         ctx.strokeStyle = bubble.fill;
-        ctx.lineWidth = Math.max(1, strokeW - 2);
+        ctx.lineWidth = 5 * exportScaleX;
         ctx.lineCap = "round";
         ctx.stroke();
         ctx.restore();
@@ -5626,24 +5632,24 @@ function PanelsTab({
 
                     return (
                       <g key={`connector-${bubble.id}`}>
-                        {/* Connector line with stroke */}
+                        {/* Connector line - outer stroke */}
                         <line
                           x1={`${parentEdgeX}%`}
                           y1={`${parentEdgeY}%`}
                           x2={`${childEdgeX}%`}
                           y2={`${childEdgeY}%`}
                           stroke={bubble.stroke}
-                          strokeWidth={Math.max(3, bubble.strokeWidth + 1)}
+                          strokeWidth={8}
                           strokeLinecap="round"
                         />
-                        {/* White fill line for bridge effect */}
+                        {/* Connector line - inner fill */}
                         <line
                           x1={`${parentEdgeX}%`}
                           y1={`${parentEdgeY}%`}
                           x2={`${childEdgeX}%`}
                           y2={`${childEdgeY}%`}
                           stroke={bubble.fill}
-                          strokeWidth={Math.max(2, bubble.strokeWidth)}
+                          strokeWidth={5}
                           strokeLinecap="round"
                         />
                       </g>

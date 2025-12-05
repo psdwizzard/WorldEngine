@@ -1354,10 +1354,11 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
 
         const fill = bubble.fill ?? "#ffffff";
         const stroke = bubble.stroke ?? "#000000";
-        const sw = Math.max(2, Math.round((bubble.strokeWidth ?? 2) * exportScale));
+        const outerStrokeW = Math.round(8 * exportScale);
+        const innerStrokeW = Math.round(5 * exportScale);
 
         // Calculate bounding box for the connector line
-        const padding = sw + 2;
+        const padding = outerStrokeW + 2;
         const minX = Math.min(parentEdgeX, childEdgeX) - padding;
         const maxX = Math.max(parentEdgeX, childEdgeX) + padding;
         const minY = Math.min(parentEdgeY, childEdgeY) - padding;
@@ -1372,10 +1373,10 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
         const localChildX = childEdgeX - minX;
         const localChildY = childEdgeY - minY;
 
-        // Draw connector as two lines: stroke + fill for bridge effect
+        // Draw connector as two lines: outer stroke + inner fill
         const connectorSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}">
-          <line x1="${localParentX}" y1="${localParentY}" x2="${localChildX}" y2="${localChildY}" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round"/>
-          <line x1="${localParentX}" y1="${localParentY}" x2="${localChildX}" y2="${localChildY}" stroke="${fill}" stroke-width="${Math.max(1, sw - 2)}" stroke-linecap="round"/>
+          <line x1="${localParentX}" y1="${localParentY}" x2="${localChildX}" y2="${localChildY}" stroke="${stroke}" stroke-width="${outerStrokeW}" stroke-linecap="round"/>
+          <line x1="${localParentX}" y1="${localParentY}" x2="${localChildX}" y2="${localChildY}" stroke="${fill}" stroke-width="${innerStrokeW}" stroke-linecap="round"/>
         </svg>`;
 
         const connectorBuffer = await sharp(Buffer.from(connectorSvg)).png().toBuffer();
