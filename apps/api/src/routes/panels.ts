@@ -1337,51 +1337,45 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
         // Calculate edge points
         const dx = childCenterX - parentCenterX;
         const dy = childCenterY - parentCenterY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 1) continue; // Too close, skip
+
         const angle = Math.atan2(dy, dx);
 
         const parentRx = (parentBubble.geometry.width / 2) * psdWidth;
         const parentRy = (parentBubble.geometry.height / 2) * psdHeight;
-        const parentEdgeX = parentCenterX + parentRx * 0.85 * Math.cos(angle);
-        const parentEdgeY = parentCenterY + parentRy * 0.85 * Math.sin(angle);
+        const parentEdgeX = parentCenterX + parentRx * 0.8 * Math.cos(angle);
+        const parentEdgeY = parentCenterY + parentRy * 0.8 * Math.sin(angle);
 
         const childRx = (bubble.geometry.width / 2) * psdWidth;
         const childRy = (bubble.geometry.height / 2) * psdHeight;
-        const childEdgeX = childCenterX - childRx * 0.85 * Math.cos(angle);
-        const childEdgeY = childCenterY - childRy * 0.85 * Math.sin(angle);
+        const childEdgeX = childCenterX - childRx * 0.8 * Math.cos(angle);
+        const childEdgeY = childCenterY - childRy * 0.8 * Math.sin(angle);
 
-        const midX = (parentEdgeX + childEdgeX) / 2;
-        const midY = (parentEdgeY + childEdgeY) / 2;
-
-        const connectorScale = Math.min(psdWidth, psdHeight) / 100;
         const fill = bubble.fill ?? "#ffffff";
         const stroke = bubble.stroke ?? "#000000";
-        const sw = Math.max(1, Math.round((bubble.strokeWidth ?? 2) * exportScale));
+        const sw = Math.max(2, Math.round((bubble.strokeWidth ?? 2) * exportScale));
 
-        // Calculate bounding box for the connector shapes
-        const smallRadius = 6 * connectorScale;
-        const ellipseRx = 12 * connectorScale;
-        const ellipseRy = 8 * connectorScale;
-        
-        const minX = Math.min(parentEdgeX - smallRadius, childEdgeX - smallRadius, midX - ellipseRx);
-        const maxX = Math.max(parentEdgeX + smallRadius, childEdgeX + smallRadius, midX + ellipseRx);
-        const minY = Math.min(parentEdgeY - smallRadius, childEdgeY - smallRadius, midY - ellipseRy);
-        const maxY = Math.max(parentEdgeY + smallRadius, childEdgeY + smallRadius, midY + ellipseRy);
+        // Calculate bounding box for the connector line
+        const padding = sw + 2;
+        const minX = Math.min(parentEdgeX, childEdgeX) - padding;
+        const maxX = Math.max(parentEdgeX, childEdgeX) + padding;
+        const minY = Math.min(parentEdgeY, childEdgeY) - padding;
+        const maxY = Math.max(parentEdgeY, childEdgeY) + padding;
 
-        const svgW = Math.ceil(maxX - minX + sw * 2);
-        const svgH = Math.ceil(maxY - minY + sw * 2);
+        const svgW = Math.max(4, Math.ceil(maxX - minX));
+        const svgH = Math.max(4, Math.ceil(maxY - minY));
 
-        // Offset shapes to local SVG coordinates
-        const localParentX = parentEdgeX - minX + sw;
-        const localParentY = parentEdgeY - minY + sw;
-        const localChildX = childEdgeX - minX + sw;
-        const localChildY = childEdgeY - minY + sw;
-        const localMidX = midX - minX + sw;
-        const localMidY = midY - minY + sw;
+        // Offset to local SVG coordinates
+        const localParentX = parentEdgeX - minX;
+        const localParentY = parentEdgeY - minY;
+        const localChildX = childEdgeX - minX;
+        const localChildY = childEdgeY - minY;
 
+        // Draw connector as two lines: stroke + fill for bridge effect
         const connectorSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}">
-          <ellipse cx="${localMidX}" cy="${localMidY}" rx="${ellipseRx}" ry="${ellipseRy}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>
-          <circle cx="${localParentX}" cy="${localParentY}" r="${smallRadius}" fill="${parentBubble.fill ?? fill}" stroke="${parentBubble.stroke ?? stroke}" stroke-width="${sw}"/>
-          <circle cx="${localChildX}" cy="${localChildY}" r="${smallRadius}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>
+          <line x1="${localParentX}" y1="${localParentY}" x2="${localChildX}" y2="${localChildY}" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round"/>
+          <line x1="${localParentX}" y1="${localParentY}" x2="${localChildX}" y2="${localChildY}" stroke="${fill}" stroke-width="${Math.max(1, sw - 2)}" stroke-linecap="round"/>
         </svg>`;
 
         const connectorBuffer = await sharp(Buffer.from(connectorSvg)).png().toBuffer();
@@ -1390,8 +1384,8 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
         layers.push({
           name: "Bubble Connector",
           imageData: connectorImageData,
-          left: Math.round(minX - sw),
-          top: Math.round(minY - sw),
+          left: Math.round(minX),
+          top: Math.round(minY),
           opacity: 1,
           blendMode: "normal",
         });

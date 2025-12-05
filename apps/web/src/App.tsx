@@ -4353,53 +4353,41 @@ function PanelsTab({
         // Calculate edge points
         const dx = childCenterX - parentCenterX;
         const dy = childCenterY - parentCenterY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 1) continue; // Too close, skip
+
         const angle = Math.atan2(dy, dx);
 
         const parentRx = (parentBubble.geometry.width / 2) * width;
         const parentRy = (parentBubble.geometry.height / 2) * height;
-        const parentEdgeX = parentCenterX + parentRx * 0.85 * Math.cos(angle);
-        const parentEdgeY = parentCenterY + parentRy * 0.85 * Math.sin(angle);
+        const parentEdgeX = parentCenterX + parentRx * 0.8 * Math.cos(angle);
+        const parentEdgeY = parentCenterY + parentRy * 0.8 * Math.sin(angle);
 
         const childRx = (bubble.geometry.width / 2) * width;
         const childRy = (bubble.geometry.height / 2) * height;
-        const childEdgeX = childCenterX - childRx * 0.85 * Math.cos(angle);
-        const childEdgeY = childCenterY - childRy * 0.85 * Math.sin(angle);
+        const childEdgeX = childCenterX - childRx * 0.8 * Math.cos(angle);
+        const childEdgeY = childCenterY - childRy * 0.8 * Math.sin(angle);
 
-        const midX = (parentEdgeX + childEdgeX) / 2;
-        const midY = (parentEdgeY + childEdgeY) / 2;
-
-        const connectorScale = Math.min(width, height) / 100;
-
-        // Draw connector bridge ellipse
+        // Draw connector line with stroke
+        const strokeW = Math.max(2, bubble.strokeWidth) * exportScaleX;
         ctx.save();
         ctx.beginPath();
-        ctx.ellipse(midX, midY, 12 * connectorScale, 8 * connectorScale, 0, 0, Math.PI * 2);
-        ctx.fillStyle = bubble.fill;
-        ctx.fill();
-        ctx.lineWidth = bubble.strokeWidth * exportScaleX;
+        ctx.moveTo(parentEdgeX, parentEdgeY);
+        ctx.lineTo(childEdgeX, childEdgeY);
         ctx.strokeStyle = bubble.stroke;
+        ctx.lineWidth = strokeW;
+        ctx.lineCap = "round";
         ctx.stroke();
         ctx.restore();
 
-        // Draw small circle at parent edge
+        // Draw inner fill line
         ctx.save();
         ctx.beginPath();
-        ctx.arc(parentEdgeX, parentEdgeY, 6 * connectorScale, 0, Math.PI * 2);
-        ctx.fillStyle = parentBubble.fill;
-        ctx.fill();
-        ctx.lineWidth = parentBubble.strokeWidth * exportScaleX;
-        ctx.strokeStyle = parentBubble.stroke;
-        ctx.stroke();
-        ctx.restore();
-
-        // Draw small circle at child edge
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(childEdgeX, childEdgeY, 6 * connectorScale, 0, Math.PI * 2);
-        ctx.fillStyle = bubble.fill;
-        ctx.fill();
-        ctx.lineWidth = bubble.strokeWidth * exportScaleX;
-        ctx.strokeStyle = bubble.stroke;
+        ctx.moveTo(parentEdgeX, parentEdgeY);
+        ctx.lineTo(childEdgeX, childEdgeY);
+        ctx.strokeStyle = bubble.fill;
+        ctx.lineWidth = Math.max(1, strokeW - 2);
+        ctx.lineCap = "round";
         ctx.stroke();
         ctx.restore();
       }
@@ -5590,88 +5578,76 @@ function PanelsTab({
                   )}
                 </div>
               ))}
-            {/* Bubble connectors for linked bubbles */}
-            {page && status !== "loading" && (page.bubbles ?? []).some((b) => b.linkedToId) && (
-              <svg
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  height: "100%",
-                  pointerEvents: "none",
-                  zIndex: 149,
-                  overflow: "visible",
-                }}
-              >
-                {(page.bubbles ?? [])
-                  .filter((bubble) => bubble.linkedToId)
-                  .map((bubble) => {
-                    const parentBubble = (page.bubbles ?? []).find((b) => b.id === bubble.linkedToId);
-                    if (!parentBubble) return null;
+            {/* Bubble connectors for linked bubbles - rendered per-bubble for proper updates */}
+            {page && status !== "loading" && (page.bubbles ?? [])
+              .filter((bubble) => bubble.linkedToId)
+              .map((bubble) => {
+                const parentBubble = (page.bubbles ?? []).find((b) => b.id === bubble.linkedToId);
+                if (!parentBubble) return null;
 
-                    // Calculate center points of both bubbles (in percentage)
-                    const parentCenterX = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * 100;
-                    const parentCenterY = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * 100;
-                    const childCenterX = (bubble.geometry.x + bubble.geometry.width / 2) * 100;
-                    const childCenterY = (bubble.geometry.y + bubble.geometry.height / 2) * 100;
+                // Calculate center points of both bubbles (in percentage)
+                const parentCenterX = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * 100;
+                const parentCenterY = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * 100;
+                const childCenterX = (bubble.geometry.x + bubble.geometry.width / 2) * 100;
+                const childCenterY = (bubble.geometry.y + bubble.geometry.height / 2) * 100;
 
-                    // Calculate edge points (where connector meets the bubble edges)
-                    const dx = childCenterX - parentCenterX;
-                    const dy = childCenterY - parentCenterY;
-                    const angle = Math.atan2(dy, dx);
+                // Calculate edge points (where connector meets the bubble edges)
+                const dx = childCenterX - parentCenterX;
+                const dy = childCenterY - parentCenterY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 0.1) return null; // Too close, no connector needed
 
-                    // Parent bubble edge point
-                    const parentRx = (parentBubble.geometry.width / 2) * 100;
-                    const parentRy = (parentBubble.geometry.height / 2) * 100;
-                    const parentEdgeX = parentCenterX + parentRx * 0.85 * Math.cos(angle);
-                    const parentEdgeY = parentCenterY + parentRy * 0.85 * Math.sin(angle);
+                const angle = Math.atan2(dy, dx);
 
-                    // Child bubble edge point (opposite direction)
-                    const childRx = (bubble.geometry.width / 2) * 100;
-                    const childRy = (bubble.geometry.height / 2) * 100;
-                    const childEdgeX = childCenterX - childRx * 0.85 * Math.cos(angle);
-                    const childEdgeY = childCenterY - childRy * 0.85 * Math.sin(angle);
+                // Parent bubble edge point
+                const parentRx = (parentBubble.geometry.width / 2) * 100;
+                const parentRy = (parentBubble.geometry.height / 2) * 100;
+                const parentEdgeX = parentCenterX + parentRx * 0.8 * Math.cos(angle);
+                const parentEdgeY = parentCenterY + parentRy * 0.8 * Math.sin(angle);
 
-                    // Draw a small bridge connector (two small circles with a line)
-                    const midX = (parentEdgeX + childEdgeX) / 2;
-                    const midY = (parentEdgeY + childEdgeY) / 2;
+                // Child bubble edge point (opposite direction)
+                const childRx = (bubble.geometry.width / 2) * 100;
+                const childRy = (bubble.geometry.height / 2) * 100;
+                const childEdgeX = childCenterX - childRx * 0.8 * Math.cos(angle);
+                const childEdgeY = childCenterY - childRy * 0.8 * Math.sin(angle);
 
-                    return (
-                      <g key={`connector-${bubble.id}`}>
-                        {/* Connector bridge shape */}
-                        <ellipse
-                          cx={`${midX}%`}
-                          cy={`${midY}%`}
-                          rx="1.2%"
-                          ry="0.8%"
-                          fill={bubble.fill}
-                          stroke={bubble.stroke}
-                          strokeWidth={bubble.strokeWidth}
-                        />
-                        {/* Small circle at parent edge */}
-                        <circle
-                          cx={`${parentEdgeX}%`}
-                          cy={`${parentEdgeY}%`}
-                          r="0.6%"
-                          fill={parentBubble.fill}
-                          stroke={parentBubble.stroke}
-                          strokeWidth={parentBubble.strokeWidth}
-                        />
-                        {/* Small circle at child edge */}
-                        <circle
-                          cx={`${childEdgeX}%`}
-                          cy={`${childEdgeY}%`}
-                          r="0.6%"
-                          fill={bubble.fill}
-                          stroke={bubble.stroke}
-                          strokeWidth={bubble.strokeWidth}
-                        />
-                      </g>
-                    );
-                  })}
-              </svg>
-            )}
+                return (
+                  <svg
+                    key={`connector-${bubble.id}-${parentBubble.geometry.x.toFixed(3)}-${parentBubble.geometry.y.toFixed(3)}-${bubble.geometry.x.toFixed(3)}-${bubble.geometry.y.toFixed(3)}`}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      height: "100%",
+                      pointerEvents: "none",
+                      zIndex: 149,
+                      overflow: "visible",
+                    }}
+                  >
+                    {/* Curved connector line between bubbles */}
+                    <line
+                      x1={`${parentEdgeX}%`}
+                      y1={`${parentEdgeY}%`}
+                      x2={`${childEdgeX}%`}
+                      y2={`${childEdgeY}%`}
+                      stroke={bubble.stroke}
+                      strokeWidth={Math.max(2, bubble.strokeWidth)}
+                      strokeLinecap="round"
+                    />
+                    {/* White fill line for bridge effect */}
+                    <line
+                      x1={`${parentEdgeX}%`}
+                      y1={`${parentEdgeY}%`}
+                      x2={`${childEdgeX}%`}
+                      y2={`${childEdgeY}%`}
+                      stroke={bubble.fill}
+                      strokeWidth={Math.max(1, bubble.strokeWidth - 1)}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                );
+              })}
             {/* Speech and thought bubbles */}
             {page &&
               status !== "loading" &&
