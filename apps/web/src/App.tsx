@@ -4405,9 +4405,9 @@ function PanelsTab({
         ctx.stroke();
         ctx.restore();
 
-        // Draw bulge at child bubble connection point
-        const bulgeRx = width * 0.015;
-        const bulgeRy = height * 0.01;
+        // Draw small bulge at child bubble connection point
+        const bulgeRx = 8 * exportScaleX;
+        const bulgeRy = 5 * exportScaleX;
         ctx.save();
         ctx.beginPath();
         ctx.ellipse(childEdgeX, childEdgeY, bulgeRx, bulgeRy, 0, 0, Math.PI * 2);
@@ -5673,9 +5673,9 @@ function PanelsTab({
                           const ctrlX = midX + perpX;
                           const ctrlY = midY + perpY;
                           
-                          // Bulge size scales with bubble size
-                          const bulgeRx = Math.max(1.5, bubble.geometry.width * 100 * 0.15);
-                          const bulgeRy = Math.max(1, bubble.geometry.height * 100 * 0.12);
+                          // Small bulge at connection point (not too big!)
+                          const bulgeRx = 0.8;
+                          const bulgeRy = 0.5;
                           
                           return (
                             <>

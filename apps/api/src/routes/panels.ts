@@ -1368,8 +1368,8 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
         const ctrlY = midY + perpY;
 
         // Calculate bounding box for the curved connector
-        const bulgeRx = psdWidth * 0.015;
-        const bulgeRy = psdHeight * 0.01;
+        const bulgeRx = 8 * exportScale;
+        const bulgeRy = 5 * exportScale;
         const padding = Math.max(outerStrokeW, bulgeRx, bulgeRy) + 5;
         const minX = Math.min(parentEdgeX, childEdgeX, ctrlX) - padding;
         const maxX = Math.max(parentEdgeX, childEdgeX, ctrlX) + padding;
