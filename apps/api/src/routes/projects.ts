@@ -59,6 +59,8 @@ const createProjectSchema = z.object({
     .optional(),
   description: z.string().optional(),
   issueLabel: z.string().optional(),
+  /** System prompt prepended to all panel generation requests. */
+  systemPrompt: z.string().optional(),
   promptPresets: promptPresetSchema,
 });
 
@@ -108,9 +110,10 @@ projectsRouter.post("/", async (req, res) => {
   }
 
   try {
-    const { promptPresets, ...rest } = parsed.data;
+    const { promptPresets, systemPrompt, ...rest } = parsed.data;
     const project = await createProject({
       ...rest,
+      systemPrompt: systemPrompt?.trim() || undefined,
       promptPresets: normalizePromptPresets(promptPresets),
     });
     res.status(201).json({ project });
@@ -137,9 +140,10 @@ projectsRouter.patch("/:projectId", async (req, res) => {
   }
 
   try {
-    const { promptPresets, ...rest } = parsed.data;
+    const { promptPresets, systemPrompt, ...rest } = parsed.data;
     const project = await updateProject(params.data.projectId, {
       ...rest,
+      systemPrompt: systemPrompt?.trim() || undefined,
       promptPresets: normalizePromptPresets(promptPresets),
     });
     res.json({ project });

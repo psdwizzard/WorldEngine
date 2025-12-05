@@ -13,6 +13,7 @@ import {
   findPanelById,
 } from "../stores/panels";
 import { resolveProjectSlug } from "../lib/projectScope";
+import { findProjectBySlug } from "../stores/projects";
 import { getAsset, getAssetBuffer, saveAsset, saveAssetBuffer } from "../services/assetStore";
 import sharp from "sharp";
 import { writePsd, Layer, Psd } from "ag-psd";
@@ -535,8 +536,15 @@ panelsRouter.post("/render", async (req, res) => {
 
     const targetModel = resolvePanelRenderModel(parsed.data.model, env, DEFAULT_IMAGE_MODEL);
 
+    // Prepend project's system prompt if available
+    const project = findProjectBySlug(projectSlug);
+    const systemPrompt = project?.systemPrompt?.trim();
+    const finalPrompt = systemPrompt
+      ? `${systemPrompt}\n\n${parsed.data.prompt}`
+      : parsed.data.prompt;
+
     const generationRequest = {
-      prompt: parsed.data.prompt,
+      prompt: finalPrompt,
       imageInput,
       model: targetModel,
       outputDimensions: {
@@ -657,10 +665,17 @@ panelsRouter.post("/edit", async (req, res) => {
 
     const targetModel = resolvePanelRenderModel(parsed.data.model, env, DEFAULT_IMAGE_MODEL);
 
+    // Prepend project's system prompt if available
+    const project = findProjectBySlug(projectSlug);
+    const systemPrompt = project?.systemPrompt?.trim();
+    const finalPrompt = systemPrompt
+      ? `${systemPrompt}\n\n${parsed.data.prompt}`
+      : parsed.data.prompt;
+
     const result = await generateImage(
       env,
       {
-        prompt: parsed.data.prompt,
+        prompt: finalPrompt,
         imageInput: {
           mimeType: asset.meta.mimeType || "image/png",
           data: resizedBase.toString("base64"),

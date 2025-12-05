@@ -262,6 +262,8 @@ export interface ProjectSummary {
   slug: string;
   description?: string;
   issueLabel?: string;
+  /** System prompt that gets prepended to all panel generation requests. */
+  systemPrompt?: string;
   createdAt: string;
   updatedAt: string;
   promptPresets?: PromptPresetSet;

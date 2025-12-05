@@ -90,6 +90,7 @@ export async function createProject(input: {
   slug?: string;
   description?: string;
   issueLabel?: string;
+  systemPrompt?: string;
   promptPresets?: PromptPresetSet;
 }): Promise<ProjectRecord> {
   ensureInitialized();
@@ -103,6 +104,7 @@ export async function createProject(input: {
     slug: uniqueSlug,
     description: input.description?.trim() || undefined,
     issueLabel: input.issueLabel?.trim() || undefined,
+    systemPrompt: input.systemPrompt?.trim() || undefined,
     createdAt: now,
     updatedAt: now,
     promptPresets: input.promptPresets,
@@ -132,6 +134,9 @@ export async function updateProject(projectId: UUID, updates: Partial<Omit<Proje
     name: updates.name?.trim() ?? existing.name,
     description: updates.description?.trim() ?? existing.description,
     issueLabel: updates.issueLabel?.trim() ?? existing.issueLabel,
+    systemPrompt: updates.systemPrompt !== undefined
+      ? (updates.systemPrompt?.trim() || undefined)
+      : existing.systemPrompt,
     updatedAt: new Date().toISOString(),
   };
 

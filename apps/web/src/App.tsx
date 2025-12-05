@@ -6705,6 +6705,8 @@ function SettingsTab({
   const [projectFormState, setProjectFormState] = useState<UploadState>({ status: "idle" });
   const [promptDrafts, setPromptDrafts] = useState<PromptPresetSet>({});
   const [promptState, setPromptState] = useState<UploadState>({ status: "idle" });
+  const [systemPromptDraft, setSystemPromptDraft] = useState("");
+  const [systemPromptState, setSystemPromptState] = useState<UploadState>({ status: "idle" });
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === settings.projectId) ?? null,
@@ -6718,6 +6720,11 @@ function SettingsTab({
       setPromptDrafts({});
     }
   }, [selectedProject?.id, selectedProject?.promptPresets]);
+
+  // Sync system prompt draft with selected project
+  useEffect(() => {
+    setSystemPromptDraft(selectedProject?.systemPrompt ?? "");
+  }, [selectedProject?.id, selectedProject?.systemPrompt]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -6825,6 +6832,23 @@ function SettingsTab({
       setPromptState({
         status: "error",
         message: error instanceof Error ? error.message : "Failed to save prompts",
+      });
+    }
+  };
+
+  const handleSystemPromptSave = async () => {
+    if (!selectedProject) return;
+    setSystemPromptState({ status: "uploading", message: "Saving system prompt..." });
+    try {
+      await api.updateProject(selectedProject.id, {
+        systemPrompt: systemPromptDraft.trim() || undefined,
+      });
+      await onRefreshProjects();
+      setSystemPromptState({ status: "success", message: "System prompt saved" });
+    } catch (error) {
+      setSystemPromptState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Failed to save system prompt",
       });
     }
   };
@@ -6947,6 +6971,45 @@ function SettingsTab({
           <p className={`upload-status status-${projectFormState.status}`} aria-live="polite">
             {projectFormState.message}
           </p>
+        )}
+      </div>
+
+      <div className="form-card">
+        <h3>System Prompt</h3>
+        {selectedProject ? (
+          <>
+            <p className="helper-text">
+              This prompt is automatically prepended to all panel generation requests for <strong>{selectedProject.name}</strong>.
+              Use it for style consistency (e.g., "In a cyberpunk comic book style").
+            </p>
+            <div className="field">
+              <label htmlFor="system-prompt">Panel generation prefix</label>
+              <textarea
+                id="system-prompt"
+                rows={4}
+                value={systemPromptDraft}
+                onChange={(event) => setSystemPromptDraft(event.target.value)}
+                placeholder="In a cyberpunk comic book style with neon highlights and dramatic shadows..."
+              />
+            </div>
+            <div className="settings-actions">
+              <button
+                type="button"
+                className="primary"
+                onClick={handleSystemPromptSave}
+                disabled={systemPromptState.status === "uploading"}
+              >
+                {systemPromptState.status === "uploading" ? "Saving..." : "Save System Prompt"}
+              </button>
+            </div>
+            {systemPromptState.message && (
+              <p className={`upload-status status-${systemPromptState.status}`} aria-live="polite">
+                {systemPromptState.message}
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="helper-text">Select a project to set a system prompt for panel generation.</p>
         )}
       </div>
 
