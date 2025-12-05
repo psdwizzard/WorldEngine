@@ -173,6 +173,8 @@ const bubbleSchema = z.object({
   strokeWidth: z.number().finite().min(0),
   tailAngle: z.number().finite(),
   tailLength: z.number().finite().min(0).max(1),
+  /** ID of another bubble this one links FROM (for chained dialogue). */
+  linkedToId: z.string().uuid().optional(),
   order: z.number().int().nonnegative(),
   createdAt: z.string(),
   updatedAt: z.string(),
