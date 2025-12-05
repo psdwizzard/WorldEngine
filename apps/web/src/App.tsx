@@ -5578,76 +5578,79 @@ function PanelsTab({
                   )}
                 </div>
               ))}
-            {/* Bubble connectors for linked bubbles - rendered per-bubble for proper updates */}
-            {page && status !== "loading" && (page.bubbles ?? [])
-              .filter((bubble) => bubble.linkedToId)
-              .map((bubble) => {
-                const parentBubble = (page.bubbles ?? []).find((b) => b.id === bubble.linkedToId);
-                if (!parentBubble) return null;
+            {/* Bubble connectors for linked bubbles */}
+            {page && status !== "loading" && (
+              <svg
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: "100%",
+                  pointerEvents: "none",
+                  zIndex: 149,
+                  overflow: "visible",
+                }}
+              >
+                {(page.bubbles ?? [])
+                  .filter((bubble) => bubble.linkedToId)
+                  .map((bubble) => {
+                    const parentBubble = (page.bubbles ?? []).find((b) => b.id === bubble.linkedToId);
+                    if (!parentBubble) return null;
 
-                // Calculate center points of both bubbles (in percentage)
-                const parentCenterX = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * 100;
-                const parentCenterY = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * 100;
-                const childCenterX = (bubble.geometry.x + bubble.geometry.width / 2) * 100;
-                const childCenterY = (bubble.geometry.y + bubble.geometry.height / 2) * 100;
+                    // Calculate center points of both bubbles (in percentage)
+                    const parentCenterX = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * 100;
+                    const parentCenterY = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * 100;
+                    const childCenterX = (bubble.geometry.x + bubble.geometry.width / 2) * 100;
+                    const childCenterY = (bubble.geometry.y + bubble.geometry.height / 2) * 100;
 
-                // Calculate edge points (where connector meets the bubble edges)
-                const dx = childCenterX - parentCenterX;
-                const dy = childCenterY - parentCenterY;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < 0.1) return null; // Too close, no connector needed
+                    // Calculate edge points (where connector meets the bubble edges)
+                    const dx = childCenterX - parentCenterX;
+                    const dy = childCenterY - parentCenterY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 0.1) return null; // Too close, no connector needed
 
-                const angle = Math.atan2(dy, dx);
+                    const angle = Math.atan2(dy, dx);
 
-                // Parent bubble edge point
-                const parentRx = (parentBubble.geometry.width / 2) * 100;
-                const parentRy = (parentBubble.geometry.height / 2) * 100;
-                const parentEdgeX = parentCenterX + parentRx * 0.8 * Math.cos(angle);
-                const parentEdgeY = parentCenterY + parentRy * 0.8 * Math.sin(angle);
+                    // Parent bubble edge point
+                    const parentRx = (parentBubble.geometry.width / 2) * 100;
+                    const parentRy = (parentBubble.geometry.height / 2) * 100;
+                    const parentEdgeX = parentCenterX + parentRx * 0.8 * Math.cos(angle);
+                    const parentEdgeY = parentCenterY + parentRy * 0.8 * Math.sin(angle);
 
-                // Child bubble edge point (opposite direction)
-                const childRx = (bubble.geometry.width / 2) * 100;
-                const childRy = (bubble.geometry.height / 2) * 100;
-                const childEdgeX = childCenterX - childRx * 0.8 * Math.cos(angle);
-                const childEdgeY = childCenterY - childRy * 0.8 * Math.sin(angle);
+                    // Child bubble edge point (opposite direction)
+                    const childRx = (bubble.geometry.width / 2) * 100;
+                    const childRy = (bubble.geometry.height / 2) * 100;
+                    const childEdgeX = childCenterX - childRx * 0.8 * Math.cos(angle);
+                    const childEdgeY = childCenterY - childRy * 0.8 * Math.sin(angle);
 
-                return (
-                  <svg
-                    key={`connector-${bubble.id}-${parentBubble.geometry.x.toFixed(3)}-${parentBubble.geometry.y.toFixed(3)}-${bubble.geometry.x.toFixed(3)}-${bubble.geometry.y.toFixed(3)}`}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      height: "100%",
-                      pointerEvents: "none",
-                      zIndex: 149,
-                      overflow: "visible",
-                    }}
-                  >
-                    {/* Curved connector line between bubbles */}
-                    <line
-                      x1={`${parentEdgeX}%`}
-                      y1={`${parentEdgeY}%`}
-                      x2={`${childEdgeX}%`}
-                      y2={`${childEdgeY}%`}
-                      stroke={bubble.stroke}
-                      strokeWidth={Math.max(2, bubble.strokeWidth)}
-                      strokeLinecap="round"
-                    />
-                    {/* White fill line for bridge effect */}
-                    <line
-                      x1={`${parentEdgeX}%`}
-                      y1={`${parentEdgeY}%`}
-                      x2={`${childEdgeX}%`}
-                      y2={`${childEdgeY}%`}
-                      stroke={bubble.fill}
-                      strokeWidth={Math.max(1, bubble.strokeWidth - 1)}
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                );
-              })}
+                    return (
+                      <g key={`connector-${bubble.id}`}>
+                        {/* Connector line with stroke */}
+                        <line
+                          x1={`${parentEdgeX}%`}
+                          y1={`${parentEdgeY}%`}
+                          x2={`${childEdgeX}%`}
+                          y2={`${childEdgeY}%`}
+                          stroke={bubble.stroke}
+                          strokeWidth={Math.max(3, bubble.strokeWidth + 1)}
+                          strokeLinecap="round"
+                        />
+                        {/* White fill line for bridge effect */}
+                        <line
+                          x1={`${parentEdgeX}%`}
+                          y1={`${parentEdgeY}%`}
+                          x2={`${childEdgeX}%`}
+                          y2={`${childEdgeY}%`}
+                          stroke={bubble.fill}
+                          strokeWidth={Math.max(2, bubble.strokeWidth)}
+                          strokeLinecap="round"
+                        />
+                      </g>
+                    );
+                  })}
+              </svg>
+            )}
             {/* Speech and thought bubbles */}
             {page &&
               status !== "loading" &&
