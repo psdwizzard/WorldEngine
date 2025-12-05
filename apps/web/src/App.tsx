@@ -2854,6 +2854,63 @@ function PanelsTab({
     markDirty();
   }, [page, markDirty]);
 
+  // Create a new bubble linked to the currently selected bubble
+  const handleCreateLinkedBubble = useCallback(() => {
+    if (!page || !selectedBubbleId) return;
+
+    const parentBubble = page.bubbles?.find((b) => b.id === selectedBubbleId);
+    if (!parentBubble) return;
+
+    const now = new Date().toISOString();
+    
+    // Position the new bubble offset from the parent
+    // Calculate offset based on where there's space (try right, then down, then left, then up)
+    const offsetX = 0.15;
+    const offsetY = 0.08;
+    let newX = parentBubble.geometry.x + parentBubble.geometry.width + 0.02;
+    let newY = parentBubble.geometry.y;
+    
+    // If it would go off the right edge, try below
+    if (newX + 0.2 > 0.95) {
+      newX = parentBubble.geometry.x;
+      newY = parentBubble.geometry.y + parentBubble.geometry.height + 0.02;
+    }
+    
+    // Clamp to canvas bounds
+    newX = Math.max(0.02, Math.min(0.75, newX));
+    newY = Math.max(0.02, Math.min(0.85, newY));
+
+    const newBubble: StoryboardBubble = {
+      id: crypto.randomUUID() as UUID,
+      type: parentBubble.type,
+      geometry: { x: newX, y: newY, width: 0.2, height: 0.1 },
+      text: "",
+      fontFamily: parentBubble.fontFamily,
+      fontSize: parentBubble.fontSize,
+      fill: parentBubble.fill,
+      stroke: parentBubble.stroke,
+      strokeWidth: parentBubble.strokeWidth,
+      tailAngle: parentBubble.tailAngle,
+      tailLength: 0, // No tail for linked bubbles - the connector replaces it
+      linkedToId: parentBubble.id,
+      order: (page.bubbles?.length ?? 0) + 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    setPage((previous) => {
+      if (!previous) return previous;
+      return {
+        ...previous,
+        bubbles: [...(previous.bubbles ?? []), newBubble],
+        updatedAt: now,
+      };
+    });
+
+    setSelectedBubbleId(newBubble.id);
+    markDirty();
+  }, [page, selectedBubbleId, markDirty]);
+
   const handleDeleteBubble = useCallback(
     (bubbleId: UUID) => {
       setPage((previous) => {
@@ -4280,9 +4337,75 @@ function PanelsTab({
         ctx.restore();
       }
 
+      // Draw bubble connectors for linked bubbles
+      const bubbles = page.bubbles ?? [];
+      for (const bubble of bubbles) {
+        if (!bubble.linkedToId) continue;
+        const parentBubble = bubbles.find((b) => b.id === bubble.linkedToId);
+        if (!parentBubble) continue;
+
+        // Calculate center points
+        const parentCenterX = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * width;
+        const parentCenterY = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * height;
+        const childCenterX = (bubble.geometry.x + bubble.geometry.width / 2) * width;
+        const childCenterY = (bubble.geometry.y + bubble.geometry.height / 2) * height;
+
+        // Calculate edge points
+        const dx = childCenterX - parentCenterX;
+        const dy = childCenterY - parentCenterY;
+        const angle = Math.atan2(dy, dx);
+
+        const parentRx = (parentBubble.geometry.width / 2) * width;
+        const parentRy = (parentBubble.geometry.height / 2) * height;
+        const parentEdgeX = parentCenterX + parentRx * 0.85 * Math.cos(angle);
+        const parentEdgeY = parentCenterY + parentRy * 0.85 * Math.sin(angle);
+
+        const childRx = (bubble.geometry.width / 2) * width;
+        const childRy = (bubble.geometry.height / 2) * height;
+        const childEdgeX = childCenterX - childRx * 0.85 * Math.cos(angle);
+        const childEdgeY = childCenterY - childRy * 0.85 * Math.sin(angle);
+
+        const midX = (parentEdgeX + childEdgeX) / 2;
+        const midY = (parentEdgeY + childEdgeY) / 2;
+
+        const connectorScale = Math.min(width, height) / 100;
+
+        // Draw connector bridge ellipse
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(midX, midY, 12 * connectorScale, 8 * connectorScale, 0, 0, Math.PI * 2);
+        ctx.fillStyle = bubble.fill;
+        ctx.fill();
+        ctx.lineWidth = bubble.strokeWidth * exportScaleX;
+        ctx.strokeStyle = bubble.stroke;
+        ctx.stroke();
+        ctx.restore();
+
+        // Draw small circle at parent edge
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(parentEdgeX, parentEdgeY, 6 * connectorScale, 0, Math.PI * 2);
+        ctx.fillStyle = parentBubble.fill;
+        ctx.fill();
+        ctx.lineWidth = parentBubble.strokeWidth * exportScaleX;
+        ctx.strokeStyle = parentBubble.stroke;
+        ctx.stroke();
+        ctx.restore();
+
+        // Draw small circle at child edge
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(childEdgeX, childEdgeY, 6 * connectorScale, 0, Math.PI * 2);
+        ctx.fillStyle = bubble.fill;
+        ctx.fill();
+        ctx.lineWidth = bubble.strokeWidth * exportScaleX;
+        ctx.strokeStyle = bubble.stroke;
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // Draw speech/thought bubbles
       const bubbleExportScale = exportScaleX;
-      const bubbles = page.bubbles ?? [];
       for (const bubble of bubbles) {
         const bubX = bubble.geometry.x * width;
         const bubY = bubble.geometry.y * height;
@@ -5467,6 +5590,88 @@ function PanelsTab({
                   )}
                 </div>
               ))}
+            {/* Bubble connectors for linked bubbles */}
+            {page && status !== "loading" && (page.bubbles ?? []).some((b) => b.linkedToId) && (
+              <svg
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: "100%",
+                  pointerEvents: "none",
+                  zIndex: 149,
+                  overflow: "visible",
+                }}
+              >
+                {(page.bubbles ?? [])
+                  .filter((bubble) => bubble.linkedToId)
+                  .map((bubble) => {
+                    const parentBubble = (page.bubbles ?? []).find((b) => b.id === bubble.linkedToId);
+                    if (!parentBubble) return null;
+
+                    // Calculate center points of both bubbles (in percentage)
+                    const parentCenterX = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * 100;
+                    const parentCenterY = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * 100;
+                    const childCenterX = (bubble.geometry.x + bubble.geometry.width / 2) * 100;
+                    const childCenterY = (bubble.geometry.y + bubble.geometry.height / 2) * 100;
+
+                    // Calculate edge points (where connector meets the bubble edges)
+                    const dx = childCenterX - parentCenterX;
+                    const dy = childCenterY - parentCenterY;
+                    const angle = Math.atan2(dy, dx);
+
+                    // Parent bubble edge point
+                    const parentRx = (parentBubble.geometry.width / 2) * 100;
+                    const parentRy = (parentBubble.geometry.height / 2) * 100;
+                    const parentEdgeX = parentCenterX + parentRx * 0.85 * Math.cos(angle);
+                    const parentEdgeY = parentCenterY + parentRy * 0.85 * Math.sin(angle);
+
+                    // Child bubble edge point (opposite direction)
+                    const childRx = (bubble.geometry.width / 2) * 100;
+                    const childRy = (bubble.geometry.height / 2) * 100;
+                    const childEdgeX = childCenterX - childRx * 0.85 * Math.cos(angle);
+                    const childEdgeY = childCenterY - childRy * 0.85 * Math.sin(angle);
+
+                    // Draw a small bridge connector (two small circles with a line)
+                    const midX = (parentEdgeX + childEdgeX) / 2;
+                    const midY = (parentEdgeY + childEdgeY) / 2;
+
+                    return (
+                      <g key={`connector-${bubble.id}`}>
+                        {/* Connector bridge shape */}
+                        <ellipse
+                          cx={`${midX}%`}
+                          cy={`${midY}%`}
+                          rx="1.2%"
+                          ry="0.8%"
+                          fill={bubble.fill}
+                          stroke={bubble.stroke}
+                          strokeWidth={bubble.strokeWidth}
+                        />
+                        {/* Small circle at parent edge */}
+                        <circle
+                          cx={`${parentEdgeX}%`}
+                          cy={`${parentEdgeY}%`}
+                          r="0.6%"
+                          fill={parentBubble.fill}
+                          stroke={parentBubble.stroke}
+                          strokeWidth={parentBubble.strokeWidth}
+                        />
+                        {/* Small circle at child edge */}
+                        <circle
+                          cx={`${childEdgeX}%`}
+                          cy={`${childEdgeY}%`}
+                          r="0.6%"
+                          fill={bubble.fill}
+                          stroke={bubble.stroke}
+                          strokeWidth={bubble.strokeWidth}
+                        />
+                      </g>
+                    );
+                  })}
+              </svg>
+            )}
             {/* Speech and thought bubbles */}
             {page &&
               status !== "loading" &&
@@ -6446,11 +6651,24 @@ function PanelsTab({
                     <button
                       type="button"
                       className="ghost"
+                      onClick={handleCreateLinkedBubble}
+                      title="Add a linked bubble for chained dialogue"
+                    >
+                      + Linked Bubble
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
                       onClick={() => handleDeleteBubble(selectedBubble.id)}
                     >
                       Delete Bubble
                     </button>
                   </div>
+                  {selectedBubble.linkedToId && (
+                    <p className="helper-text" style={{ marginTop: "0.5rem", fontSize: "0.75rem", opacity: 0.7 }}>
+                      🔗 Linked to another bubble
+                    </p>
+                  )}
                 </>
               )}
             </div>

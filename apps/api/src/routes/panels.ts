@@ -1320,9 +1320,88 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
       }
     }
 
+    // Create bubble connector layers for linked bubbles
+    const bubbles = page.bubbles ?? [];
+    for (const bubble of bubbles) {
+      if (!bubble.linkedToId) continue;
+      const parentBubble = bubbles.find((b) => b.id === bubble.linkedToId);
+      if (!parentBubble) continue;
+
+      try {
+        // Calculate center points in pixels
+        const parentCenterX = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * psdWidth;
+        const parentCenterY = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * psdHeight;
+        const childCenterX = (bubble.geometry.x + bubble.geometry.width / 2) * psdWidth;
+        const childCenterY = (bubble.geometry.y + bubble.geometry.height / 2) * psdHeight;
+
+        // Calculate edge points
+        const dx = childCenterX - parentCenterX;
+        const dy = childCenterY - parentCenterY;
+        const angle = Math.atan2(dy, dx);
+
+        const parentRx = (parentBubble.geometry.width / 2) * psdWidth;
+        const parentRy = (parentBubble.geometry.height / 2) * psdHeight;
+        const parentEdgeX = parentCenterX + parentRx * 0.85 * Math.cos(angle);
+        const parentEdgeY = parentCenterY + parentRy * 0.85 * Math.sin(angle);
+
+        const childRx = (bubble.geometry.width / 2) * psdWidth;
+        const childRy = (bubble.geometry.height / 2) * psdHeight;
+        const childEdgeX = childCenterX - childRx * 0.85 * Math.cos(angle);
+        const childEdgeY = childCenterY - childRy * 0.85 * Math.sin(angle);
+
+        const midX = (parentEdgeX + childEdgeX) / 2;
+        const midY = (parentEdgeY + childEdgeY) / 2;
+
+        const connectorScale = Math.min(psdWidth, psdHeight) / 100;
+        const fill = bubble.fill ?? "#ffffff";
+        const stroke = bubble.stroke ?? "#000000";
+        const sw = Math.max(1, Math.round((bubble.strokeWidth ?? 2) * exportScale));
+
+        // Calculate bounding box for the connector shapes
+        const smallRadius = 6 * connectorScale;
+        const ellipseRx = 12 * connectorScale;
+        const ellipseRy = 8 * connectorScale;
+        
+        const minX = Math.min(parentEdgeX - smallRadius, childEdgeX - smallRadius, midX - ellipseRx);
+        const maxX = Math.max(parentEdgeX + smallRadius, childEdgeX + smallRadius, midX + ellipseRx);
+        const minY = Math.min(parentEdgeY - smallRadius, childEdgeY - smallRadius, midY - ellipseRy);
+        const maxY = Math.max(parentEdgeY + smallRadius, childEdgeY + smallRadius, midY + ellipseRy);
+
+        const svgW = Math.ceil(maxX - minX + sw * 2);
+        const svgH = Math.ceil(maxY - minY + sw * 2);
+
+        // Offset shapes to local SVG coordinates
+        const localParentX = parentEdgeX - minX + sw;
+        const localParentY = parentEdgeY - minY + sw;
+        const localChildX = childEdgeX - minX + sw;
+        const localChildY = childEdgeY - minY + sw;
+        const localMidX = midX - minX + sw;
+        const localMidY = midY - minY + sw;
+
+        const connectorSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}">
+          <ellipse cx="${localMidX}" cy="${localMidY}" rx="${ellipseRx}" ry="${ellipseRy}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>
+          <circle cx="${localParentX}" cy="${localParentY}" r="${smallRadius}" fill="${parentBubble.fill ?? fill}" stroke="${parentBubble.stroke ?? stroke}" stroke-width="${sw}"/>
+          <circle cx="${localChildX}" cy="${localChildY}" r="${smallRadius}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>
+        </svg>`;
+
+        const connectorBuffer = await sharp(Buffer.from(connectorSvg)).png().toBuffer();
+        const connectorImageData = await sharpToImageData(connectorBuffer);
+
+        layers.push({
+          name: "Bubble Connector",
+          imageData: connectorImageData,
+          left: Math.round(minX - sw),
+          top: Math.round(minY - sw),
+          opacity: 1,
+          blendMode: "normal",
+        });
+      } catch (connectorErr) {
+        console.warn("Bubble connector layer failed:", connectorErr);
+      }
+    }
+
     // Create speech/thought bubble layers
     // All coordinates calculated directly in pixel space (no viewBox scaling)
-    const bubbles = page.bubbles ?? [];
     for (const bubble of bubbles) {
       const bubX = Math.round(bubble.geometry.x * psdWidth);
       const bubY = Math.round(bubble.geometry.y * psdHeight);

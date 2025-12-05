@@ -182,6 +182,8 @@ export interface StoryboardBubble {
   tailAngle: number;
   /** Tail length as fraction of bubble size (0-1). */
   tailLength: number;
+  /** ID of another bubble this one links FROM (for chained dialogue). */
+  linkedToId?: UUID;
   /** Z-index order (higher = on top). */
   order: number;
   createdAt: string;
