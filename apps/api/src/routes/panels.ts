@@ -1356,21 +1356,31 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
 
         const fill = bubble.fill ?? "#ffffff";
         const stroke = bubble.stroke ?? "#000000";
-        const outerStrokeW = Math.round(6 * exportScale);
-        const innerStrokeW = Math.round(4 * exportScale);
 
-        // Calculate control point for curve
+        // Distance-based scaling
+        const lineDx = childEdgeX - parentEdgeX;
+        const lineDy = childEdgeY - parentEdgeY;
+        const lineLen = Math.max(0.001, Math.sqrt(lineDx * lineDx + lineDy * lineDy));
+
+        // Curve amount
+        const curveAmount = Math.min(35 * exportScale, Math.max(10 * exportScale, lineLen * 0.4));
+        const perpX = -(lineDy / lineLen) * curveAmount;
+        const perpY = (lineDx / lineLen) * curveAmount;
         const midX = (parentEdgeX + childEdgeX) / 2;
         const midY = (parentEdgeY + childEdgeY) / 2;
-        const perpX = -(childEdgeY - parentEdgeY) * 0.3;
-        const perpY = (childEdgeX - parentEdgeX) * 0.3;
         const ctrlX = midX + perpX;
         const ctrlY = midY + perpY;
 
+        // Stroke widths
+        const outerStrokeW = Math.min(14 * exportScale, Math.max(8 * exportScale, lineLen * 0.12));
+        const innerStrokeW = Math.max(outerStrokeW * 0.6, 5 * exportScale);
+
+        // Caps
+        const parentCap = outerStrokeW * 0.45;
+        const childCap = outerStrokeW * 0.7;
+
         // Calculate bounding box for the curved connector
-        const bulgeRx = 8 * exportScale;
-        const bulgeRy = 5 * exportScale;
-        const padding = Math.max(outerStrokeW, bulgeRx, bulgeRy) + 5;
+        const padding = Math.max(outerStrokeW, childCap, parentCap) + 6;
         const minX = Math.min(parentEdgeX, childEdgeX, ctrlX) - padding;
         const maxX = Math.max(parentEdgeX, childEdgeX, ctrlX) + padding;
         const minY = Math.min(parentEdgeY, childEdgeY, ctrlY) - padding;
@@ -1387,12 +1397,13 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
         const localCtrlX = ctrlX - minX;
         const localCtrlY = ctrlY - minY;
 
-        // Draw curved connector with bulge at child end
+        // Draw curved connector with caps
         const curvePath = `M ${localParentX} ${localParentY} Q ${localCtrlX} ${localCtrlY} ${localChildX} ${localChildY}`;
         const connectorSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}">
           <path d="${curvePath}" fill="none" stroke="${stroke}" stroke-width="${outerStrokeW}" stroke-linecap="round"/>
           <path d="${curvePath}" fill="none" stroke="${fill}" stroke-width="${innerStrokeW}" stroke-linecap="round"/>
-          <ellipse cx="${localChildX}" cy="${localChildY}" rx="${bulgeRx}" ry="${bulgeRy}" fill="${fill}" stroke="${stroke}" stroke-width="${Math.round(2 * exportScale)}"/>
+          <circle cx="${localParentX}" cy="${localParentY}" r="${parentCap}" fill="${fill}" stroke="${stroke}" stroke-width="${innerStrokeW * 0.6}"/>
+          <circle cx="${localChildX}" cy="${localChildY}" r="${childCap}" fill="${fill}" stroke="${stroke}" stroke-width="${innerStrokeW * 0.6}"/>
         </svg>`;
 
         const connectorBuffer = await sharp(Buffer.from(connectorSvg)).png().toBuffer();

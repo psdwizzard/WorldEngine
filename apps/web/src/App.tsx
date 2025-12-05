@@ -4375,46 +4375,68 @@ function PanelsTab({
         const childEdgeX = childCenterX - childRx * 0.8 * Math.cos(angle);
         const childEdgeY = childCenterY - childRy * 0.8 * Math.sin(angle);
 
-        // Calculate control point for curve
+        // Distance-based scaling
+        const lineDx = childEdgeX - parentEdgeX;
+        const lineDy = childEdgeY - parentEdgeY;
+        const lineLen = Math.max(0.001, Math.sqrt(lineDx * lineDx + lineDy * lineDy));
+
+        // Curve amount
+        const curveAmount = Math.min(35 * exportScaleX, Math.max(10 * exportScaleX, lineLen * 0.4));
+        const perpX = -(lineDy / lineLen) * curveAmount;
+        const perpY = (lineDx / lineLen) * curveAmount;
         const midX = (parentEdgeX + childEdgeX) / 2;
         const midY = (parentEdgeY + childEdgeY) / 2;
-        const perpX = -(childEdgeY - parentEdgeY) * 0.3;
-        const perpY = (childEdgeX - parentEdgeX) * 0.3;
         const ctrlX = midX + perpX;
         const ctrlY = midY + perpY;
 
-        // Draw curved connector - outer stroke
+        // Stroke widths
+        const outerW = Math.min(14 * exportScaleX, Math.max(8 * exportScaleX, lineLen * 0.12));
+        const innerW = Math.max(outerW * 0.6, 5 * exportScaleX);
+
+        // Caps
+        const parentCap = outerW * 0.45;
+        const childCap = outerW * 0.7;
+
+        // Curved connector - outer
         ctx.save();
         ctx.beginPath();
         ctx.moveTo(parentEdgeX, parentEdgeY);
         ctx.quadraticCurveTo(ctrlX, ctrlY, childEdgeX, childEdgeY);
         ctx.strokeStyle = bubble.stroke;
-        ctx.lineWidth = 6 * exportScaleX;
+        ctx.lineWidth = outerW;
         ctx.lineCap = "round";
         ctx.stroke();
         ctx.restore();
 
-        // Draw curved connector - inner fill
+        // Curved connector - inner
         ctx.save();
         ctx.beginPath();
         ctx.moveTo(parentEdgeX, parentEdgeY);
         ctx.quadraticCurveTo(ctrlX, ctrlY, childEdgeX, childEdgeY);
         ctx.strokeStyle = bubble.fill;
-        ctx.lineWidth = 4 * exportScaleX;
+        ctx.lineWidth = innerW;
         ctx.lineCap = "round";
         ctx.stroke();
         ctx.restore();
 
-        // Draw small bulge at child bubble connection point
-        const bulgeRx = 8 * exportScaleX;
-        const bulgeRy = 5 * exportScaleX;
+        // Caps
         ctx.save();
         ctx.beginPath();
-        ctx.ellipse(childEdgeX, childEdgeY, bulgeRx, bulgeRy, 0, 0, Math.PI * 2);
+        ctx.arc(parentEdgeX, parentEdgeY, parentCap, 0, Math.PI * 2);
         ctx.fillStyle = bubble.fill;
         ctx.fill();
         ctx.strokeStyle = bubble.stroke;
-        ctx.lineWidth = 2 * exportScaleX;
+        ctx.lineWidth = innerW * 0.6;
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(childEdgeX, childEdgeY, childCap, 0, Math.PI * 2);
+        ctx.fillStyle = bubble.fill;
+        ctx.fill();
+        ctx.strokeStyle = bubble.stroke;
+        ctx.lineWidth = innerW * 0.6;
         ctx.stroke();
         ctx.restore();
       }
@@ -5655,28 +5677,30 @@ function PanelsTab({
 
                     return (
                       <g key={`connector-${bubble.id}`}>
-                        {/* Calculate control point for curve - offset perpendicular to the line */}
                         {(() => {
                           const midX = (parentEdgeX + childEdgeX) / 2;
                           const midY = (parentEdgeY + childEdgeY) / 2;
-                          
-                          // Calculate distance between points for scaling
+
+                          // Distance-based scaling
                           const lineDx = childEdgeX - parentEdgeX;
                           const lineDy = childEdgeY - parentEdgeY;
-                          const lineLen = Math.sqrt(lineDx * lineDx + lineDy * lineDy);
-                          
-                          // Perpendicular offset for curve (makes it bulge outward)
-                          // Normalize and scale by line length for consistent curve
-                          const curveAmount = Math.max(3, lineLen * 0.4);
+                          const lineLen = Math.max(0.001, Math.sqrt(lineDx * lineDx + lineDy * lineDy));
+
+                          // Curve amount: bend more on longer links, but clamp
+                          const curveAmount = Math.min(35, Math.max(10, lineLen * 0.4));
                           const perpX = -(lineDy / lineLen) * curveAmount;
                           const perpY = (lineDx / lineLen) * curveAmount;
                           const ctrlX = midX + perpX;
                           const ctrlY = midY + perpY;
-                          
-                          // Small bulge at connection point (not too big!)
-                          const bulgeRx = 0.8;
-                          const bulgeRy = 0.5;
-                          
+
+                          // Stroke thickness scales with link length, clamped
+                          const outerW = Math.min(14, Math.max(8, lineLen * 0.12));
+                          const innerW = Math.max(outerW * 0.6, 5);
+
+                          // Caps at ends, slightly bigger on the child side
+                          const parentCap = outerW * 0.45;
+                          const childCap = outerW * 0.7;
+
                           return (
                             <>
                               {/* Curved connector - outer stroke */}
@@ -5684,7 +5708,7 @@ function PanelsTab({
                                 d={`M ${parentEdgeX} ${parentEdgeY} Q ${ctrlX} ${ctrlY} ${childEdgeX} ${childEdgeY}`}
                                 fill="none"
                                 stroke={bubble.stroke}
-                                strokeWidth={4}
+                                strokeWidth={outerW}
                                 strokeLinecap="round"
                                 vectorEffect="non-scaling-stroke"
                               />
@@ -5693,19 +5717,27 @@ function PanelsTab({
                                 d={`M ${parentEdgeX} ${parentEdgeY} Q ${ctrlX} ${ctrlY} ${childEdgeX} ${childEdgeY}`}
                                 fill="none"
                                 stroke={bubble.fill}
-                                strokeWidth={2}
+                                strokeWidth={innerW}
                                 strokeLinecap="round"
                                 vectorEffect="non-scaling-stroke"
                               />
-                              {/* Bulge at child bubble connection point */}
-                              <ellipse
-                                cx={childEdgeX}
-                                cy={childEdgeY}
-                                rx={bulgeRx}
-                                ry={bulgeRy}
+                              {/* Caps at ends to give a soft, bulbous join */}
+                              <circle
+                                cx={parentEdgeX}
+                                cy={parentEdgeY}
+                                r={parentCap}
                                 fill={bubble.fill}
                                 stroke={bubble.stroke}
-                                strokeWidth={2}
+                                strokeWidth={innerW * 0.6}
+                                vectorEffect="non-scaling-stroke"
+                              />
+                              <circle
+                                cx={childEdgeX}
+                                cy={childEdgeY}
+                                r={childCap}
+                                fill={bubble.fill}
+                                stroke={bubble.stroke}
+                                strokeWidth={innerW * 0.6}
                                 vectorEffect="non-scaling-stroke"
                               />
                             </>
