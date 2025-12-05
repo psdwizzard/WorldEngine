@@ -5608,6 +5608,8 @@ function PanelsTab({
             {/* Bubble connectors for linked bubbles */}
             {page && status !== "loading" && (
               <svg
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
                 style={{
                   position: "absolute",
                   top: 0,
@@ -5657,42 +5659,54 @@ function PanelsTab({
                         {(() => {
                           const midX = (parentEdgeX + childEdgeX) / 2;
                           const midY = (parentEdgeY + childEdgeY) / 2;
-                          // Perpendicular offset for curve (makes it bulge)
-                          const perpX = -(childEdgeY - parentEdgeY) * 0.3;
-                          const perpY = (childEdgeX - parentEdgeX) * 0.3;
+                          
+                          // Calculate distance between points for scaling
+                          const lineDx = childEdgeX - parentEdgeX;
+                          const lineDy = childEdgeY - parentEdgeY;
+                          const lineLen = Math.sqrt(lineDx * lineDx + lineDy * lineDy);
+                          
+                          // Perpendicular offset for curve (makes it bulge outward)
+                          // Normalize and scale by line length for consistent curve
+                          const curveAmount = Math.max(3, lineLen * 0.4);
+                          const perpX = -(lineDy / lineLen) * curveAmount;
+                          const perpY = (lineDx / lineLen) * curveAmount;
                           const ctrlX = midX + perpX;
                           const ctrlY = midY + perpY;
                           
-                          // Curved path
-                          const curvePath = `M ${parentEdgeX}% ${parentEdgeY}% Q ${ctrlX}% ${ctrlY}% ${childEdgeX}% ${childEdgeY}%`;
+                          // Bulge size scales with bubble size
+                          const bulgeRx = Math.max(1.5, bubble.geometry.width * 100 * 0.15);
+                          const bulgeRy = Math.max(1, bubble.geometry.height * 100 * 0.12);
                           
                           return (
                             <>
                               {/* Curved connector - outer stroke */}
                               <path
-                                d={curvePath}
+                                d={`M ${parentEdgeX} ${parentEdgeY} Q ${ctrlX} ${ctrlY} ${childEdgeX} ${childEdgeY}`}
                                 fill="none"
                                 stroke={bubble.stroke}
-                                strokeWidth={6}
+                                strokeWidth={4}
                                 strokeLinecap="round"
+                                vectorEffect="non-scaling-stroke"
                               />
                               {/* Curved connector - inner fill */}
                               <path
-                                d={curvePath}
+                                d={`M ${parentEdgeX} ${parentEdgeY} Q ${ctrlX} ${ctrlY} ${childEdgeX} ${childEdgeY}`}
                                 fill="none"
                                 stroke={bubble.fill}
-                                strokeWidth={4}
+                                strokeWidth={2}
                                 strokeLinecap="round"
+                                vectorEffect="non-scaling-stroke"
                               />
                               {/* Bulge at child bubble connection point */}
                               <ellipse
-                                cx={`${childEdgeX}%`}
-                                cy={`${childEdgeY}%`}
-                                rx="1.5%"
-                                ry="1%"
+                                cx={childEdgeX}
+                                cy={childEdgeY}
+                                rx={bulgeRx}
+                                ry={bulgeRy}
                                 fill={bubble.fill}
                                 stroke={bubble.stroke}
                                 strokeWidth={2}
+                                vectorEffect="non-scaling-stroke"
                               />
                             </>
                           );
