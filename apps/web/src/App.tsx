@@ -4481,10 +4481,11 @@ function PanelsTab({
         const nx = -dirY;
         const ny = dirX;
 
+        // Connector width scaled to bubble size so it's proportionally visible
         const strokeW = (childBubble.strokeWidth ?? 2) * exportScaleX;
-        // 75% slimmer connector (25% of original tip widths)
-        const TIP_WIDE = strokeW * 1.25;
-        const TIP_NARROW = strokeW * 0.625;
+        const connectorScale = Math.min(width, height) * 0.025;
+        const TIP_WIDE = connectorScale;
+        const TIP_NARROW = connectorScale * 0.5;
 
         // Endpoints at CENTER of bubbles to hide seams
         const startX = childCx;
@@ -4597,10 +4598,10 @@ function PanelsTab({
         const nx = -dirY;
         const ny = dirX;
 
-        const strokeW = (childBubble.strokeWidth ?? 2) * exportScaleX;
-        // 75% slimmer connector (25% of original tip widths)
-        const TIP_WIDE = strokeW * 1.25;
-        const TIP_NARROW = strokeW * 0.625;
+        // Connector width scaled to bubble size so it's proportionally visible
+        const connectorScale = Math.min(width, height) * 0.025;
+        const TIP_WIDE = connectorScale;
+        const TIP_NARROW = connectorScale * 0.5;
 
         const startX = childCx;
         const startY = childCy;
@@ -4631,16 +4632,17 @@ function PanelsTab({
         ctx.fill();
       }
 
-      // Fill parent tips after ellipses so they sit on top
+      // Fill parent tips after ellipses so they sit on top (only ROOT parents)
       for (const bubble of bubbles) {
         const hasChild = bubbles.some((b) => b.linkedToId === bubble.id);
-        if (!hasChild) continue;
+        // Only roots (no parent) should draw tips
+        if (!hasChild || bubble.linkedToId) continue;
 
         const cx = (bubble.geometry.x + bubble.geometry.width / 2) * width;
         const cy = (bubble.geometry.y + bubble.geometry.height / 2) * height;
-        // Use full radius for tips so they are not pulled inward
-        const rx = (bubble.geometry.width / 2) * width;
-        const ry = (bubble.geometry.height / 2) * height;
+        // Match ellipse inset so base meets bubble edge cleanly
+        const rx = (bubble.geometry.width / 2) * width * 0.9;
+        const ry = (bubble.geometry.height / 2) * height * 0.9;
         const rMin = Math.min(rx, ry);
 
         const tailAngle = (bubble.tailAngle ?? 240) * (Math.PI / 180);
@@ -4653,7 +4655,7 @@ function PanelsTab({
         const base2X = cx + rx * Math.cos(angle2);
         const base2Y = cy + ry * Math.sin(angle2);
         const strokeW = (bubble.strokeWidth ?? 2) * exportScaleX;
-        const tailLen = rMin * (bubble.tailLength ?? 0.3) + strokeW * 2;
+        const tailLen = rMin * Math.max(0.05, bubble.tailLength ?? 0.3) + strokeW * 0.5;
         const tipX = cx + (rMin + tailLen) * Math.cos(tailAngle);
         const tipY = cy + (rMin + tailLen) * Math.sin(tailAngle);
 
