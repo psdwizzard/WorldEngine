@@ -5752,10 +5752,10 @@ function PanelsTab({
                   {/* Outline layer */}
                   <g stroke={strokeColor} strokeWidth={strokeWidth} strokeLinejoin="round" strokeLinecap="round" fill="none">
                     {tails.map((t) => (
-                      <path key={`ol-${t.key}`} d={t.d} />
+                      <path key={`ol-${t.key}`} d={t.d} vectorEffect="non-scaling-stroke" />
                     ))}
                     {ellipses.map((b) => (
-                      <ellipse key={`ol-${b.key}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} />
+                      <ellipse key={`ol-${b.key}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} vectorEffect="non-scaling-stroke" />
                     ))}
                   </g>
 
