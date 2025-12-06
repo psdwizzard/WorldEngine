@@ -4482,8 +4482,9 @@ function PanelsTab({
         const ny = dirX;
 
         const strokeW = (childBubble.strokeWidth ?? 2) * exportScaleX;
-        const TIP_WIDE = strokeW * 5;
-        const TIP_NARROW = strokeW * 2.5;
+        // 75% slimmer connector (25% of original tip widths)
+        const TIP_WIDE = strokeW * 1.25;
+        const TIP_NARROW = strokeW * 0.625;
 
         // Endpoints at CENTER of bubbles to hide seams
         const startX = childCx;
@@ -4548,8 +4549,9 @@ function PanelsTab({
         const ny = dirX;
 
         const strokeW = (childBubble.strokeWidth ?? 2) * exportScaleX;
-        const TIP_WIDE = strokeW * 5;
-        const TIP_NARROW = strokeW * 2.5;
+        // 75% slimmer connector (25% of original tip widths)
+        const TIP_WIDE = strokeW * 1.25;
+        const TIP_NARROW = strokeW * 0.625;
 
         const startX = childCx;
         const startY = childCy;
@@ -5692,8 +5694,9 @@ function PanelsTab({
                 const ny = dirX;
 
                 const strokeW = child.strokeWidth ?? 2;
-                const TIP_WIDE = strokeW * 5;
-                const TIP_NARROW = strokeW * 2.5;
+                // 75% slimmer connector (25% of original tip widths)
+                const TIP_WIDE = strokeW * 1.25;
+                const TIP_NARROW = strokeW * 0.625;
 
                 // Move endpoints to CENTER of bubbles to completely hide seams
                 const startX = childCx;
