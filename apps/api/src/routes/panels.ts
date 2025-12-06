@@ -175,6 +175,7 @@ const bubbleSchema = z.object({
   tailLength: z.number().finite().min(0).max(1),
   /** ID of another bubble this one links FROM (for chained dialogue). */
   linkedToId: z.string().uuid().optional(),
+  linkedCurveFlip: z.boolean().optional(),
   order: z.number().int().nonnegative(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -1167,9 +1168,9 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
     }
 
     // Create caption box layers
-    // Scale factor for fonts/strokes: UI preview ~500px, export ~2000px
-    const uiPreviewWidth = 500;
-    const exportScale = psdWidth / uiPreviewWidth;
+    // Scale factor for fonts/strokes: match PNG export scaling (target ~1988px)
+    const targetWidth = 1988;
+    const exportScale = psdWidth / targetWidth;
 
     const captionBoxes = page.captionBoxes ?? [];
     for (const caption of captionBoxes) {
@@ -1322,107 +1323,123 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
       }
     }
 
-    // Create bubble connector layers for linked bubbles
+    // Create speech/thought bubble layers
     const bubbles = page.bubbles ?? [];
+
+    // Build lookup for linked bubbles
+    const linkedBubbleIds = new Set<string>();
+    bubbles.forEach((b) => {
+      if (b.linkedToId) {
+        linkedBubbleIds.add(b.id);
+        linkedBubbleIds.add(b.linkedToId);
+      }
+    });
+
+    // Create bubble connector layers FIRST with stroke+fill (mirrors PNG overlay)
     for (const bubble of bubbles) {
       if (!bubble.linkedToId) continue;
       const parentBubble = bubbles.find((b) => b.id === bubble.linkedToId);
       if (!parentBubble) continue;
 
       try {
-        // Calculate center points in pixels
-        const parentCenterX = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * psdWidth;
-        const parentCenterY = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * psdHeight;
+        // Use the same unified connector shape as PNG export (center-to-center, tapered quad)
         const childCenterX = (bubble.geometry.x + bubble.geometry.width / 2) * psdWidth;
         const childCenterY = (bubble.geometry.y + bubble.geometry.height / 2) * psdHeight;
+        const parentCenterX = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * psdWidth;
+        const parentCenterY = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * psdHeight;
 
-        // Calculate edge points
-        const dx = childCenterX - parentCenterX;
-        const dy = childCenterY - parentCenterY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 1) continue; // Too close, skip
+        const dx = parentCenterX - childCenterX;
+        const dy = parentCenterY - childCenterY;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const dirX = dx / dist;
+        const dirY = dy / dist;
+        const nx = -dirY;
+        const ny = dirX;
 
-        const angle = Math.atan2(dy, dx);
+        // Connector width - match PNG's thicker connectors (export matches canvas)
+        const connectorScale = Math.min(psdWidth, psdHeight) * 0.012;
+        const tipWide = connectorScale;
+        const tipNarrow = connectorScale * 0.5;
+        
+        // Stroke width for unified outline
+        const strokeW = Math.max(1, Math.round((bubble.strokeWidth ?? 2) * exportScale));
 
-        const parentRx = (parentBubble.geometry.width / 2) * psdWidth;
-        const parentRy = (parentBubble.geometry.height / 2) * psdHeight;
-        const parentEdgeX = parentCenterX + parentRx * 0.8 * Math.cos(angle);
-        const parentEdgeY = parentCenterY + parentRy * 0.8 * Math.sin(angle);
+        // Curved ribbon
+        const curviness = dist * 0.15;
+        const ctrlX = (childCenterX + parentCenterX) * 0.5 + nx * curviness;
+        const ctrlY = (childCenterY + parentCenterY) * 0.5 + ny * curviness;
 
-        const childRx = (bubble.geometry.width / 2) * psdWidth;
-        const childRy = (bubble.geometry.height / 2) * psdHeight;
-        const childEdgeX = childCenterX - childRx * 0.8 * Math.cos(angle);
-        const childEdgeY = childCenterY - childRy * 0.8 * Math.sin(angle);
+        const p1x = childCenterX + nx * tipWide * 0.5;
+        const p1y = childCenterY + ny * tipWide * 0.5;
+        const p2x = parentCenterX + nx * tipNarrow * 0.5;
+        const p2y = parentCenterY + ny * tipNarrow * 0.5;
+        const p3x = parentCenterX - nx * tipNarrow * 0.5;
+        const p3y = parentCenterY - ny * tipNarrow * 0.5;
+        const p4x = childCenterX - nx * tipWide * 0.5;
+        const p4y = childCenterY - ny * tipWide * 0.5;
 
-        const fill = bubble.fill ?? "#ffffff";
-        const stroke = bubble.stroke ?? "#000000";
-
-        // Distance-based scaling
-        const lineDx = childEdgeX - parentEdgeX;
-        const lineDy = childEdgeY - parentEdgeY;
-        const lineLen = Math.max(0.001, Math.sqrt(lineDx * lineDx + lineDy * lineDy));
-
-        // Curve amount
-        const curveAmount = Math.min(35 * exportScale, Math.max(10 * exportScale, lineLen * 0.4));
-        const perpX = -(lineDy / lineLen) * curveAmount;
-        const perpY = (lineDx / lineLen) * curveAmount;
-        const midX = (parentEdgeX + childEdgeX) / 2;
-        const midY = (parentEdgeY + childEdgeY) / 2;
-        const ctrlX = midX + perpX;
-        const ctrlY = midY + perpY;
-
-        // Stroke widths
-        const outerStrokeW = Math.min(14 * exportScale, Math.max(8 * exportScale, lineLen * 0.12));
-        const innerStrokeW = Math.max(outerStrokeW * 0.6, 5 * exportScale);
-
-        // Caps
-        const parentCap = outerStrokeW * 0.45;
-        const childCap = outerStrokeW * 0.7;
-
-        // Calculate bounding box for the curved connector
-        const padding = Math.max(outerStrokeW, childCap, parentCap) + 6;
-        const minX = Math.min(parentEdgeX, childEdgeX, ctrlX) - padding;
-        const maxX = Math.max(parentEdgeX, childEdgeX, ctrlX) + padding;
-        const minY = Math.min(parentEdgeY, childEdgeY, ctrlY) - padding;
-        const maxY = Math.max(parentEdgeY, childEdgeY, ctrlY) + padding;
+        // Bounding box with stroke margin
+        const allX = [p1x, p2x, p3x, p4x, ctrlX];
+        const allY = [p1y, p2y, p3y, p4y, ctrlY];
+        const margin = strokeW * 2;
+        const minX = Math.min(...allX) - margin;
+        const minY = Math.min(...allY) - margin;
+        const maxX = Math.max(...allX) + margin;
+        const maxY = Math.max(...allY) + margin;
 
         const svgW = Math.max(4, Math.ceil(maxX - minX));
         const svgH = Math.max(4, Math.ceil(maxY - minY));
 
-        // Offset to local SVG coordinates
-        const localParentX = parentEdgeX - minX;
-        const localParentY = parentEdgeY - minY;
-        const localChildX = childEdgeX - minX;
-        const localChildY = childEdgeY - minY;
-        const localCtrlX = ctrlX - minX;
-        const localCtrlY = ctrlY - minY;
+        // Local coords
+        const lp1x = p1x - minX, lp1y = p1y - minY;
+        const lp2x = p2x - minX, lp2y = p2y - minY;
+        const lp3x = p3x - minX, lp3y = p3y - minY;
+        const lp4x = p4x - minX, lp4y = p4y - minY;
+        const lcx = ctrlX - minX, lcy = ctrlY - minY;
 
-        // Draw curved connector with caps
-        const curvePath = `M ${localParentX} ${localParentY} Q ${localCtrlX} ${localCtrlY} ${localChildX} ${localChildY}`;
-        const connectorSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}">
-          <path d="${curvePath}" fill="none" stroke="${stroke}" stroke-width="${outerStrokeW}" stroke-linecap="round"/>
-          <path d="${curvePath}" fill="none" stroke="${fill}" stroke-width="${innerStrokeW}" stroke-linecap="round"/>
-          <circle cx="${localParentX}" cy="${localParentY}" r="${parentCap}" fill="${fill}" stroke="${stroke}" stroke-width="${innerStrokeW * 0.6}"/>
-          <circle cx="${localChildX}" cy="${localChildY}" r="${childCap}" fill="${fill}" stroke="${stroke}" stroke-width="${innerStrokeW * 0.6}"/>
-        </svg>`;
+        const fill = bubble.fill ?? "#ffffff";
+        const stroke = bubble.stroke ?? "#000000";
 
-        const connectorBuffer = await sharp(Buffer.from(connectorSvg)).png().toBuffer();
-        const connectorImageData = await sharpToImageData(connectorBuffer);
-
-        layers.push({
-          name: "Bubble Connector",
-          imageData: connectorImageData,
-          left: Math.round(minX),
-          top: Math.round(minY),
-          opacity: 1,
-          blendMode: "normal",
-        });
+        // Connector with fill AND stroke (bubble fills will cover internal seams)
+        const connectorPath = `M ${lp1x} ${lp1y} Q ${lcx} ${lcy} ${lp2x} ${lp2y} L ${lp3x} ${lp3y} Q ${lcx} ${lcy} ${lp4x} ${lp4y} Z`;
+        // Outline layer
+        {
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}">
+            <path d="${connectorPath}" fill="none" stroke="${stroke}" stroke-width="${strokeW}" stroke-linejoin="round" stroke-linecap="round"/>
+          </svg>`;
+          const buf = await sharp(Buffer.from(svg)).png().toBuffer();
+          const img = await sharpToImageData(buf);
+          layers.push({
+            name: "Bubble Connector Outline",
+            imageData: img,
+            left: Math.round(minX),
+            top: Math.round(minY),
+            opacity: 1,
+            blendMode: "normal",
+          });
+        }
+        // Fill layer
+        {
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}">
+            <path d="${connectorPath}" fill="${fill}" stroke="none"/>
+          </svg>`;
+          const buf = await sharp(Buffer.from(svg)).png().toBuffer();
+          const img = await sharpToImageData(buf);
+          layers.push({
+            name: "Bubble Connector Fill",
+            imageData: img,
+            left: Math.round(minX),
+            top: Math.round(minY),
+            opacity: 1,
+            blendMode: "normal",
+          });
+        }
       } catch (connectorErr) {
         console.warn("Bubble connector layer failed:", connectorErr);
       }
     }
 
-    // Create speech/thought bubble layers
+    // Create speech/thought bubble layers (AFTER connectors, so bubble strokes cover connector seams)
     // All coordinates calculated directly in pixel space (no viewBox scaling)
     for (const bubble of bubbles) {
       const bubX = Math.round(bubble.geometry.x * psdWidth);
@@ -1446,7 +1463,10 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
 
       let bubbleSvg: string;
 
-      if (bubble.type === "thought") {
+      // Skip stroke/fill for linked bubbles; connectors/ellipses handle shape
+      if (bubble.linkedToId) {
+        // Only render text layer below
+      } else if (bubble.type === "thought") {
         // Thought bubble: main ellipse + 3 trailing circles
         // Use expanded canvas that can fit circles in any direction
         const angleRad = (tailAngle * Math.PI) / 180;
@@ -1598,8 +1618,8 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
         });
 
         // Add bubble text layer
-        if (bubble.text) {
-          const fontSize = Math.max(12, Math.round((bubble.fontSize ?? 0.85) * 16 * exportScale));
+      if (bubble.text) {
+        const fontSize = Math.round((bubble.fontSize ?? 0.85) * 16 * exportScale);
           const fontFamily = bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif";
           const lineHeight = Math.round(fontSize * 1.2);
 
