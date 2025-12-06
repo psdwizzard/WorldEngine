@@ -2893,6 +2893,7 @@ function PanelsTab({
       tailAngle: parentBubble.tailAngle,
       tailLength: 0, // No tail for linked bubbles - the connector replaces it
       linkedToId: parentBubble.id,
+      linkedCurveFlip: false,
       order: (page.bubbles?.length ?? 0) + 1,
       createdAt: now,
       updatedAt: now,
@@ -4344,110 +4345,34 @@ function PanelsTab({
         ctx.restore();
       }
 
-      // Draw bubble connectors for linked bubbles
-      const bubbles = page.bubbles ?? [];
-      for (const bubble of bubbles) {
-        if (!bubble.linkedToId) continue;
-        const parentBubble = bubbles.find((b) => b.id === bubble.linkedToId);
-        if (!parentBubble) continue;
-
-        // Calculate center points
-        const parentCenterX = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * width;
-        const parentCenterY = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * height;
-        const childCenterX = (bubble.geometry.x + bubble.geometry.width / 2) * width;
-        const childCenterY = (bubble.geometry.y + bubble.geometry.height / 2) * height;
-
-        // Calculate edge points
-        const dx = childCenterX - parentCenterX;
-        const dy = childCenterY - parentCenterY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 1) continue; // Too close, skip
-
-        const angle = Math.atan2(dy, dx);
-
-        const parentRx = (parentBubble.geometry.width / 2) * width;
-        const parentRy = (parentBubble.geometry.height / 2) * height;
-        const parentEdgeX = parentCenterX + parentRx * 0.8 * Math.cos(angle);
-        const parentEdgeY = parentCenterY + parentRy * 0.8 * Math.sin(angle);
-
-        const childRx = (bubble.geometry.width / 2) * width;
-        const childRy = (bubble.geometry.height / 2) * height;
-        const childEdgeX = childCenterX - childRx * 0.8 * Math.cos(angle);
-        const childEdgeY = childCenterY - childRy * 0.8 * Math.sin(angle);
-
-        // Distance-based scaling
-        const lineDx = childEdgeX - parentEdgeX;
-        const lineDy = childEdgeY - parentEdgeY;
-        const lineLen = Math.max(0.001, Math.sqrt(lineDx * lineDx + lineDy * lineDy));
-
-        // Curve amount
-        const curveAmount = Math.min(35 * exportScaleX, Math.max(10 * exportScaleX, lineLen * 0.4));
-        const perpX = -(lineDy / lineLen) * curveAmount;
-        const perpY = (lineDx / lineLen) * curveAmount;
-        const midX = (parentEdgeX + childEdgeX) / 2;
-        const midY = (parentEdgeY + childEdgeY) / 2;
-        const ctrlX = midX + perpX;
-        const ctrlY = midY + perpY;
-
-        // Stroke widths
-        const outerW = Math.min(14 * exportScaleX, Math.max(8 * exportScaleX, lineLen * 0.12));
-        const innerW = Math.max(outerW * 0.6, 5 * exportScaleX);
-
-        // Caps
-        const parentCap = outerW * 0.45;
-        const childCap = outerW * 0.7;
-
-        // Curved connector - outer
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(parentEdgeX, parentEdgeY);
-        ctx.quadraticCurveTo(ctrlX, ctrlY, childEdgeX, childEdgeY);
-        ctx.strokeStyle = bubble.stroke;
-        ctx.lineWidth = outerW;
-        ctx.lineCap = "round";
-        ctx.stroke();
-        ctx.restore();
-
-        // Curved connector - inner
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(parentEdgeX, parentEdgeY);
-        ctx.quadraticCurveTo(ctrlX, ctrlY, childEdgeX, childEdgeY);
-        ctx.strokeStyle = bubble.fill;
-        ctx.lineWidth = innerW;
-        ctx.lineCap = "round";
-        ctx.stroke();
-        ctx.restore();
-
-        // Caps
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(parentEdgeX, parentEdgeY, parentCap, 0, Math.PI * 2);
-        ctx.fillStyle = bubble.fill;
-        ctx.fill();
-        ctx.strokeStyle = bubble.stroke;
-        ctx.lineWidth = innerW * 0.6;
-        ctx.stroke();
-        ctx.restore();
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(childEdgeX, childEdgeY, childCap, 0, Math.PI * 2);
-        ctx.fillStyle = bubble.fill;
-        ctx.fill();
-        ctx.strokeStyle = bubble.stroke;
-        ctx.lineWidth = innerW * 0.6;
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // Draw speech/thought bubbles
+      // ========== UNIFIED SHAPE approach for canvas export ==========
+      // For linked bubbles: create ONE combined path (parent + connector + child)
+      // For non-linked bubbles: draw normally with their own stroke
+      
       const bubbleExportScale = exportScaleX;
+      const bubbles = page.bubbles ?? [];
+      
+      // Collect IDs of bubbles involved in linked relationships
+      const linkedBubbleIds = new Set<string>();
+      bubbles.forEach((b) => {
+        if (b.linkedToId) {
+          linkedBubbleIds.add(b.id);
+          linkedBubbleIds.add(b.linkedToId);
+        }
+      });
+
+      // Store text data for all bubbles
+      const bubbleTextData: Array<{ bubX: number; bubY: number; bubW: number; bubH: number; bubble: typeof bubbles[0] }> = [];
+
+      // Draw non-linked bubbles first (they have their own strokes)
       for (const bubble of bubbles) {
         const bubX = bubble.geometry.x * width;
         const bubY = bubble.geometry.y * height;
         const bubW = bubble.geometry.width * width;
         const bubH = bubble.geometry.height * height;
+        bubbleTextData.push({ bubX, bubY, bubW, bubH, bubble });
+
+        if (linkedBubbleIds.has(bubble.id)) continue; // Skip linked bubbles for now
 
         const scaleX = bubW / BUBBLE_VIEWBOX_WIDTH;
         const scaleY = bubH / BUBBLE_VIEWBOX_HEIGHT;
@@ -4457,34 +4382,32 @@ function PanelsTab({
         const cxNorm = BUBBLE_VIEWBOX_WIDTH * 0.5;
         const cyNorm = BUBBLE_VIEWBOX_HEIGHT * (0.5 - bubble.tailLength * BUBBLE_TAIL_LIFT);
         const rxNorm = BUBBLE_VIEWBOX_WIDTH * 0.5 - BUBBLE_PADDING * 2;
-        const ryNorm =
-          BUBBLE_VIEWBOX_HEIGHT * 0.5 - BUBBLE_PADDING * 2 - BUBBLE_VIEWBOX_HEIGHT * bubble.tailLength * BUBBLE_TAIL_LIFT;
+        const ryNorm = BUBBLE_VIEWBOX_HEIGHT * 0.5 - BUBBLE_PADDING * 2 - BUBBLE_VIEWBOX_HEIGHT * bubble.tailLength * BUBBLE_TAIL_LIFT;
 
         ctx.save();
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.lineWidth = bubble.strokeWidth * bubbleExportScale;
+        ctx.strokeStyle = bubble.stroke;
+        ctx.fillStyle = bubble.fill;
 
         if (bubble.type === "thought") {
-          // Draw thought bubble (cloud shape)
+          // Cloud shape
           const numBumps = 10;
           const points: Array<{ x: number; y: number; bx: number; by: number }> = [];
-
           for (let i = 0; i < numBumps; i++) {
             const angle = (i / numBumps) * Math.PI * 2;
             const nextAngle = ((i + 1) / numBumps) * Math.PI * 2;
             const midAngle = (angle + nextAngle) / 2;
             const bumpOut = 0.15 * Math.sin(i * 2.3 + 1);
-            const nx = cxNorm + rxNorm * (1 + bumpOut) * Math.cos(angle);
-            const ny = cyNorm + ryNorm * (1 + bumpOut) * Math.sin(angle);
-            const x = convertX(nx);
-            const y = convertY(ny);
             const bumpFactor = 0.2 + 0.1 * Math.sin(i * 3.7);
-            const nbx = cxNorm + rxNorm * (1 + bumpFactor) * Math.cos(midAngle);
-            const nby = cyNorm + ryNorm * (1 + bumpFactor) * Math.sin(midAngle);
-            const bx = convertX(nbx);
-            const by = convertY(nby);
-            points.push({ x, y, bx, by });
+            points.push({
+              x: convertX(cxNorm + rxNorm * (1 + bumpOut) * Math.cos(angle)),
+              y: convertY(cyNorm + ryNorm * (1 + bumpOut) * Math.sin(angle)),
+              bx: convertX(cxNorm + rxNorm * (1 + bumpFactor) * Math.cos(midAngle)),
+              by: convertY(cyNorm + ryNorm * (1 + bumpFactor) * Math.sin(midAngle)),
+            });
           }
-
-          // Draw cloud shape
           ctx.beginPath();
           ctx.moveTo(points[0].x, points[0].y);
           for (let i = 0; i < points.length; i++) {
@@ -4492,75 +4415,182 @@ function PanelsTab({
             ctx.quadraticCurveTo(points[i].bx, points[i].by, next.x, next.y);
           }
           ctx.closePath();
-          ctx.fillStyle = bubble.fill;
           ctx.fill();
-          ctx.lineWidth = bubble.strokeWidth * bubbleExportScale;
-          ctx.strokeStyle = bubble.stroke;
           ctx.stroke();
 
-          // Draw thought circles (trailing from bubble)
+          // Thought circles
           const angleRad = (bubble.tailAngle * Math.PI) / 180;
-          const tailLengthNorm = bubble.tailLength * BUBBLE_VIEWBOX_HEIGHT * THOUGHT_TAIL_SCALE;
-          const totalTailLength = tailLengthNorm * 2.2;
-          const numCircles = 3;
+          const tailLengthNorm = bubble.tailLength * BUBBLE_VIEWBOX_HEIGHT * THOUGHT_TAIL_SCALE * 2.2;
           const startDistNorm = Math.max(rxNorm, ryNorm) * 0.85;
-          for (let i = 0; i < numCircles; i++) {
-            const t = (i + 1) / numCircles;
-            const distanceNorm = startDistNorm + totalTailLength * t;
-            const circleX = convertX(cxNorm + distanceNorm * Math.cos(angleRad));
-            const circleY = convertY(cyNorm + distanceNorm * Math.sin(angleRad));
-            const circleRNorm = Math.max(3, 12 - i * 3);
+          for (let i = 0; i < 3; i++) {
+            const t = (i + 1) / 3;
+            const circleX = convertX(cxNorm + (startDistNorm + tailLengthNorm * t) * Math.cos(angleRad));
+            const circleY = convertY(cyNorm + (startDistNorm + tailLengthNorm * t) * Math.sin(angleRad));
+            const r = Math.max(3, 12 - i * 3);
             ctx.beginPath();
-            ctx.ellipse(circleX, circleY, circleRNorm * scaleX, circleRNorm * scaleY, 0, 0, Math.PI * 2);
-            ctx.fillStyle = bubble.fill;
+            ctx.ellipse(circleX, circleY, r * scaleX, r * scaleY, 0, 0, Math.PI * 2);
             ctx.fill();
-            ctx.strokeStyle = bubble.stroke;
             ctx.stroke();
           }
         } else {
-          // Draw speech bubble (oval with tail as single unified shape)
+          // Speech bubble with tail
           const angleRad = (bubble.tailAngle * Math.PI) / 180;
           const tailSpread = 12;
           const angle1 = angleRad - (tailSpread * Math.PI) / 180;
           const angle2 = angleRad + (tailSpread * Math.PI) / 180;
           const tailLenNorm = bubble.tailLength * BUBBLE_VIEWBOX_HEIGHT * SPEECH_TAIL_SCALE;
 
-          const base1NormX = cxNorm + rxNorm * Math.cos(angle1);
-          const base1NormY = cyNorm + ryNorm * Math.sin(angle1);
-          const base2NormX = cxNorm + rxNorm * Math.cos(angle2);
-          const base2NormY = cyNorm + ryNorm * Math.sin(angle2);
-          const tipNormX = cxNorm + (rxNorm + tailLenNorm) * Math.cos(angleRad);
-          const tipNormY = cyNorm + (ryNorm + tailLenNorm) * Math.sin(angleRad);
+          const base1X = convertX(cxNorm + rxNorm * Math.cos(angle1));
+          const base1Y = convertY(cyNorm + ryNorm * Math.sin(angle1));
+          const tipX = convertX(cxNorm + (rxNorm + tailLenNorm) * Math.cos(angleRad));
+          const tipY = convertY(cyNorm + (ryNorm + tailLenNorm) * Math.sin(angleRad));
 
-          const base1X = convertX(base1NormX);
-          const base1Y = convertY(base1NormY);
-          const base2X = convertX(base2NormX);
-          const base2Y = convertY(base2NormY);
-          const tipX = convertX(tipNormX);
-          const tipY = convertY(tipNormY);
-          const centerX = convertX(cxNorm);
-          const centerY = convertY(cyNorm);
-          const rxActual = rxNorm * scaleX;
-          const ryActual = ryNorm * scaleY;
-
-          // Draw unified shape: arc from angle1 to angle2 (the long way around), then tail
           ctx.beginPath();
           ctx.moveTo(base1X, base1Y);
-          // counterclockwise=true goes the long way from angle1 to angle2
-          ctx.ellipse(centerX, centerY, rxActual, ryActual, 0, angle1, angle2, true);
-          // Draw tail: from base2 to tip, then close back to base1
+          ctx.ellipse(convertX(cxNorm), convertY(cyNorm), rxNorm * scaleX, ryNorm * scaleY, 0, angle1, angle2, true);
           ctx.lineTo(tipX, tipY);
           ctx.closePath();
-
-          ctx.fillStyle = bubble.fill;
           ctx.fill();
-          ctx.lineWidth = bubble.strokeWidth * bubbleExportScale;
-          ctx.strokeStyle = bubble.stroke;
-          ctx.lineJoin = "round";
           ctx.stroke();
         }
+        ctx.restore();
+      }
 
-        // Draw bubble text
+      // Draw linked bubble connectors using BubbleBoy pattern (quad tails + ellipse outlines/fills)
+      // LAYER 1: Outline all tails and linked bubble ellipses
+      ctx.save();
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      
+      // Draw tail outlines
+      for (const childBubble of bubbles) {
+        if (!childBubble.linkedToId) continue;
+        const parentBubble = bubbles.find((b) => b.id === childBubble.linkedToId);
+        if (!parentBubble) continue;
+
+        const childCx = (childBubble.geometry.x + childBubble.geometry.width / 2) * width;
+        const childCy = (childBubble.geometry.y + childBubble.geometry.height / 2) * height;
+        const parentCx = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * width;
+        const parentCy = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * height;
+
+        const dx = parentCx - childCx;
+        const dy = parentCy - childCy;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const dirX = dx / dist;
+        const dirY = dy / dist;
+        const nx = -dirY;
+        const ny = dirX;
+
+        const strokeW = (childBubble.strokeWidth ?? 2) * exportScaleX;
+        const TIP_WIDE = strokeW * 5;
+        const TIP_NARROW = strokeW * 2.5;
+
+        // Endpoints at CENTER of bubbles to hide seams
+        const startX = childCx;
+        const startY = childCy;
+        const endX = parentCx;
+        const endY = parentCy;
+
+        const p1x = startX + nx * TIP_WIDE * 0.5;
+        const p1y = startY + ny * TIP_WIDE * 0.5;
+        const p2x = endX + nx * TIP_NARROW * 0.5;
+        const p2y = endY + ny * TIP_NARROW * 0.5;
+        const p3x = endX - nx * TIP_NARROW * 0.5;
+        const p3y = endY - ny * TIP_NARROW * 0.5;
+        const p4x = startX - nx * TIP_WIDE * 0.5;
+        const p4y = startY - ny * TIP_WIDE * 0.5;
+
+        ctx.lineWidth = strokeW;
+        ctx.strokeStyle = childBubble.stroke;
+        ctx.beginPath();
+        ctx.moveTo(p1x, p1y);
+        ctx.lineTo(p2x, p2y);
+        ctx.lineTo(p3x, p3y);
+        ctx.lineTo(p4x, p4y);
+        ctx.closePath();
+        ctx.stroke();
+      }
+
+      // Draw linked bubble ellipse outlines
+      for (const bubble of bubbles) {
+        if (!linkedBubbleIds.has(bubble.id)) continue;
+        const cx = (bubble.geometry.x + bubble.geometry.width / 2) * width;
+        const cy = (bubble.geometry.y + bubble.geometry.height / 2) * height;
+        const rx = (bubble.geometry.width / 2) * width * 0.9;
+        const ry = (bubble.geometry.height / 2) * height * 0.9;
+        const strokeW = (bubble.strokeWidth ?? 2) * exportScaleX;
+
+        ctx.lineWidth = strokeW;
+        ctx.strokeStyle = bubble.stroke;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // LAYER 2: Fill all tails and linked bubble ellipses (covers internal strokes)
+      for (const childBubble of bubbles) {
+        if (!childBubble.linkedToId) continue;
+        const parentBubble = bubbles.find((b) => b.id === childBubble.linkedToId);
+        if (!parentBubble) continue;
+
+        const childCx = (childBubble.geometry.x + childBubble.geometry.width / 2) * width;
+        const childCy = (childBubble.geometry.y + childBubble.geometry.height / 2) * height;
+        const parentCx = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * width;
+        const parentCy = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * height;
+
+        const dx = parentCx - childCx;
+        const dy = parentCy - childCy;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const dirX = dx / dist;
+        const dirY = dy / dist;
+        const nx = -dirY;
+        const ny = dirX;
+
+        const strokeW = (childBubble.strokeWidth ?? 2) * exportScaleX;
+        const TIP_WIDE = strokeW * 5;
+        const TIP_NARROW = strokeW * 2.5;
+
+        const startX = childCx;
+        const startY = childCy;
+        const endX = parentCx;
+        const endY = parentCy;
+
+        const p1x = startX + nx * TIP_WIDE * 0.5;
+        const p1y = startY + ny * TIP_WIDE * 0.5;
+        const p2x = endX + nx * TIP_NARROW * 0.5;
+        const p2y = endY + ny * TIP_NARROW * 0.5;
+        const p3x = endX - nx * TIP_NARROW * 0.5;
+        const p3y = endY - ny * TIP_NARROW * 0.5;
+        const p4x = startX - nx * TIP_WIDE * 0.5;
+        const p4y = startY - ny * TIP_WIDE * 0.5;
+
+        ctx.fillStyle = childBubble.fill;
+        ctx.beginPath();
+        ctx.moveTo(p1x, p1y);
+        ctx.lineTo(p2x, p2y);
+        ctx.lineTo(p3x, p3y);
+        ctx.lineTo(p4x, p4y);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Fill linked bubble ellipses
+      for (const bubble of bubbles) {
+        if (!linkedBubbleIds.has(bubble.id)) continue;
+        const cx = (bubble.geometry.x + bubble.geometry.width / 2) * width;
+        const cy = (bubble.geometry.y + bubble.geometry.height / 2) * height;
+        const rx = (bubble.geometry.width / 2) * width * 0.9;
+        const ry = (bubble.geometry.height / 2) * height * 0.9;
+
+        ctx.fillStyle = bubble.fill;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Draw bubble text
+      for (const { bubX, bubY, bubW, bubH, bubble } of bubbleTextData) {
         const baseFontSizePx = (bubble.fontSize ?? 0.85) * 16;
         const bubFontSize = baseFontSizePx * bubbleExportScale;
         ctx.font = `${bubFontSize}px ${bubble.fontFamily ?? "Comic Sans MS, cursive"}`;
@@ -4574,7 +4604,6 @@ function PanelsTab({
         const textAreaBottom = bubY + bubH * (0.7 - bubble.tailLength * 0.2);
         const textAreaHeight = textAreaBottom - textAreaTop;
 
-        // Word wrap
         const bubbleLines: string[] = [];
         const paragraphs = bubble.text.split(/\n/);
         for (const paragraph of paragraphs) {
@@ -4606,8 +4635,6 @@ function PanelsTab({
           ctx.fillText(line, bubX + bubW / 2, bubTextY);
           bubTextY += bubLineHeight;
         }
-
-        ctx.restore();
       }
 
       const safeLabel = (page.label || "page").replace(/[^\w.-]+/g, "-");
@@ -5627,131 +5654,135 @@ function PanelsTab({
                   )}
                 </div>
               ))}
-            {/* Bubble connectors for linked bubbles */}
-            {page && status !== "loading" && (
-              <svg
-                viewBox="0 0 100 100"
-                preserveAspectRatio="none"
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  height: "100%",
-                  pointerEvents: "none",
-                  zIndex: 149,
-                  overflow: "visible",
-                }}
-              >
-                {(page.bubbles ?? [])
-                  .filter((bubble) => bubble.linkedToId)
-                  .map((bubble) => {
-                    const parentBubble = (page.bubbles ?? []).find((b) => b.id === bubble.linkedToId);
-                    if (!parentBubble) return null;
+            {/* Linked bubble connectors - BubbleBoy pattern: outline layer (strokes), fill layer (no strokes) */}
+            {page && status !== "loading" && (() => {
+              const linked = (page.bubbles ?? []).filter((b) => b.linkedToId);
+              if (linked.length === 0) return null;
 
-                    // Calculate center points of both bubbles (in percentage)
-                    const parentCenterX = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * 100;
-                    const parentCenterY = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * 100;
-                    const childCenterX = (bubble.geometry.x + bubble.geometry.width / 2) * 100;
-                    const childCenterY = (bubble.geometry.y + bubble.geometry.height / 2) * 100;
+              const linkedIds = new Set<string>();
+              linked.forEach((b) => {
+                linkedIds.add(b.id);
+                if (b.linkedToId) linkedIds.add(b.linkedToId);
+              });
 
-                    // Calculate edge points (where connector meets the bubble edges)
-                    const dx = childCenterX - parentCenterX;
-                    const dy = childCenterY - parentCenterY;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist < 0.1) return null; // Too close, no connector needed
+              const tails: Array<{ d: string; stroke: string; strokeWidth: number; fill: string; key: string }> = [];
+              const ellipses: Array<{ cx: number; cy: number; rx: number; ry: number; fill: string; stroke: string; strokeWidth: number; key: string }> = [];
 
-                    const angle = Math.atan2(dy, dx);
+              // Build tails (connector quads) in viewBox 100 space
+              for (const child of linked) {
+                const parent = (page.bubbles ?? []).find((b) => b.id === child.linkedToId);
+                if (!parent) continue;
 
-                    // Parent bubble edge point
-                    const parentRx = (parentBubble.geometry.width / 2) * 100;
-                    const parentRy = (parentBubble.geometry.height / 2) * 100;
-                    const parentEdgeX = parentCenterX + parentRx * 0.8 * Math.cos(angle);
-                    const parentEdgeY = parentCenterY + parentRy * 0.8 * Math.sin(angle);
+                const childCx = (child.geometry.x + child.geometry.width / 2) * 100;
+                const childCy = (child.geometry.y + child.geometry.height / 2) * 100;
+                const parentCx = (parent.geometry.x + parent.geometry.width / 2) * 100;
+                const parentCy = (parent.geometry.y + parent.geometry.height / 2) * 100;
 
-                    // Child bubble edge point (opposite direction)
-                    const childRx = (bubble.geometry.width / 2) * 100;
-                    const childRy = (bubble.geometry.height / 2) * 100;
-                    const childEdgeX = childCenterX - childRx * 0.8 * Math.cos(angle);
-                    const childEdgeY = childCenterY - childRy * 0.8 * Math.sin(angle);
+                const childRx = (child.geometry.width / 2) * 100;
+                const childRy = (child.geometry.height / 2) * 100;
+                const parentRx = (parent.geometry.width / 2) * 100;
+                const parentRy = (parent.geometry.height / 2) * 100;
 
-                    return (
-                      <g key={`connector-${bubble.id}`}>
-                        {(() => {
-                          const midX = (parentEdgeX + childEdgeX) / 2;
-                          const midY = (parentEdgeY + childEdgeY) / 2;
+                const dx = parentCx - childCx;
+                const dy = parentCy - childCy;
+                const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                const dirX = dx / dist;
+                const dirY = dy / dist;
+                const nx = -dirY;
+                const ny = dirX;
 
-                          // Distance-based scaling
-                          const lineDx = childEdgeX - parentEdgeX;
-                          const lineDy = childEdgeY - parentEdgeY;
-                          const lineLen = Math.max(0.001, Math.sqrt(lineDx * lineDx + lineDy * lineDy));
+                const strokeW = child.strokeWidth ?? 2;
+                const TIP_WIDE = strokeW * 5;
+                const TIP_NARROW = strokeW * 2.5;
 
-                          // Curve amount: bend more on longer links, but clamp
-                          const curveAmount = Math.min(35, Math.max(10, lineLen * 0.4));
-                          const perpX = -(lineDy / lineLen) * curveAmount;
-                          const perpY = (lineDx / lineLen) * curveAmount;
-                          const ctrlX = midX + perpX;
-                          const ctrlY = midY + perpY;
+                // Move endpoints to CENTER of bubbles to completely hide seams
+                const startX = childCx;
+                const startY = childCy;
+                const endX = parentCx;
+                const endY = parentCy;
 
-                          // Stroke thickness scales with link length, clamped
-                          const outerW = Math.min(14, Math.max(8, lineLen * 0.12));
-                          const innerW = Math.max(outerW * 0.6, 5);
+                const p1x = startX + nx * TIP_WIDE * 0.5;
+                const p1y = startY + ny * TIP_WIDE * 0.5;
+                const p2x = endX + nx * TIP_NARROW * 0.5;
+                const p2y = endY + ny * TIP_NARROW * 0.5;
+                const p3x = endX - nx * TIP_NARROW * 0.5;
+                const p3y = endY - ny * TIP_NARROW * 0.5;
+                const p4x = startX - nx * TIP_WIDE * 0.5;
+                const p4y = startY - ny * TIP_WIDE * 0.5;
 
-                          // Caps at ends, slightly bigger on the child side
-                          const parentCap = outerW * 0.45;
-                          const childCap = outerW * 0.7;
+                const d = `M ${p1x} ${p1y} L ${p2x} ${p2y} L ${p3x} ${p3y} L ${p4x} ${p4y} Z`;
+                tails.push({ d, stroke: child.stroke, strokeWidth: strokeW, fill: child.fill, key: `tail-${child.id}` });
+              }
 
-                          return (
-                            <>
-                              {/* Curved connector - outer stroke */}
-                              <path
-                                d={`M ${parentEdgeX} ${parentEdgeY} Q ${ctrlX} ${ctrlY} ${childEdgeX} ${childEdgeY}`}
-                                fill="none"
-                                stroke={bubble.stroke}
-                                strokeWidth={outerW}
-                                strokeLinecap="round"
-                                vectorEffect="non-scaling-stroke"
-                              />
-                              {/* Curved connector - inner fill */}
-                              <path
-                                d={`M ${parentEdgeX} ${parentEdgeY} Q ${ctrlX} ${ctrlY} ${childEdgeX} ${childEdgeY}`}
-                                fill="none"
-                                stroke={bubble.fill}
-                                strokeWidth={innerW}
-                                strokeLinecap="round"
-                                vectorEffect="non-scaling-stroke"
-                              />
-                              {/* Caps at ends to give a soft, bulbous join */}
-                              <circle
-                                cx={parentEdgeX}
-                                cy={parentEdgeY}
-                                r={parentCap}
-                                fill={bubble.fill}
-                                stroke={bubble.stroke}
-                                strokeWidth={innerW * 0.6}
-                                vectorEffect="non-scaling-stroke"
-                              />
-                              <circle
-                                cx={childEdgeX}
-                                cy={childEdgeY}
-                                r={childCap}
-                                fill={bubble.fill}
-                                stroke={bubble.stroke}
-                                strokeWidth={innerW * 0.6}
-                                vectorEffect="non-scaling-stroke"
-                              />
-                            </>
-                          );
-                        })()}
-                      </g>
-                    );
-                  })}
-              </svg>
-            )}
+              // Bubble ellipses for linked bubbles (slightly inset to sit under outline)
+              (page.bubbles ?? [])
+                .filter((b) => linkedIds.has(b.id))
+                .forEach((b) => {
+                  ellipses.push({
+                    key: `ellipse-${b.id}`,
+                    cx: (b.geometry.x + b.geometry.width / 2) * 100,
+                    cy: (b.geometry.y + b.geometry.height / 2) * 100,
+                    rx: (b.geometry.width / 2) * 100 * 0.9,
+                    ry: (b.geometry.height / 2) * 100 * 0.9,
+                    fill: b.fill,
+                    stroke: b.stroke,
+                    strokeWidth: b.strokeWidth ?? 2,
+                  });
+                });
+
+              // Stroke settings: take from first tail or default
+              const strokeColor = tails[0]?.stroke ?? "#000000";
+              const strokeWidth = tails[0]?.strokeWidth ?? 2;
+
+              return (
+                <svg
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: "100%",
+                    pointerEvents: "none",
+                    zIndex: 200,
+                    overflow: "visible",
+                  }}
+                >
+                  {/* Outline layer */}
+                  <g stroke={strokeColor} strokeWidth={strokeWidth} strokeLinejoin="round" strokeLinecap="round" fill="none">
+                    {tails.map((t) => (
+                      <path key={`ol-${t.key}`} d={t.d} />
+                    ))}
+                    {ellipses.map((b) => (
+                      <ellipse key={`ol-${b.key}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} />
+                    ))}
+                  </g>
+
+                  {/* Fill layer */}
+                  {tails.map((t) => (
+                    <path key={`fill-${t.key}`} d={t.d} fill={t.fill} stroke="none" />
+                  ))}
+                  {ellipses.map((b) => (
+                    <ellipse key={`fill-${b.key}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} fill={b.fill} stroke="none" />
+                  ))}
+                </svg>
+              );
+            })()}
+
             {/* Speech and thought bubbles */}
             {page &&
               status !== "loading" &&
-              (page.bubbles ?? []).map((bubble) => (
+              (() => {
+                // Compute which bubbles are involved in linked relationships
+                const linkedBubbleIds = new Set<string>();
+                (page.bubbles ?? []).forEach((b) => {
+                  if (b.linkedToId) {
+                    linkedBubbleIds.add(b.id);
+                    linkedBubbleIds.add(b.linkedToId);
+                  }
+                });
+                return (page.bubbles ?? []).map((bubble) => (
                 <div
                   key={bubble.id}
                   className={`storyboard-bubble storyboard-bubble-${bubble.type} ${selectedBubbleId === bubble.id ? "is-selected" : ""}`}
@@ -5789,6 +5820,7 @@ function PanelsTab({
                     tailLength={bubble.tailLength}
                     fontFamily={bubble.fontFamily}
                     fontSize={bubble.fontSize}
+                    hideShape={linkedBubbleIds.has(bubble.id)}
                   >
                     <span style={{ whiteSpace: "pre-wrap" }}>{bubble.text}</span>
                   </SpeechBubble>
@@ -5845,7 +5877,9 @@ function PanelsTab({
                     </>
                   )}
                 </div>
-              ))}
+              ));
+              })()}
+
           </div>
         </div>
         <form className="storyboard-form" onSubmit={(event) => event.preventDefault()}>
@@ -6732,6 +6766,18 @@ function PanelsTab({
                     >
                       + Linked Bubble
                     </button>
+                    {selectedBubble.linkedToId && (
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() =>
+                          updateBubble(selectedBubble.id, { linkedCurveFlip: !selectedBubble.linkedCurveFlip })
+                        }
+                        title="Flip connector arc direction"
+                      >
+                        Flip Connector
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="ghost"

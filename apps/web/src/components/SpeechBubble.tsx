@@ -19,6 +19,8 @@ interface SpeechBubbleProps {
   fontFamily?: string;
   /** Font size in rem */
   fontSize?: number;
+  /** Hide entire shape (for linked bubbles where shape is rendered in unified overlay) */
+  hideShape?: boolean;
 }
 
 export function SpeechBubble({
@@ -32,6 +34,7 @@ export function SpeechBubble({
   tailLength = 0.3,
   fontFamily = "Comic Sans MS, cursive",
   fontSize = 0.85,
+  hideShape = false,
 }: SpeechBubbleProps) {
   // Use a viewBox-based approach for responsive sizing
   const viewBoxWidth = 200;
@@ -60,39 +63,44 @@ export function SpeechBubble({
         height: "100%",
       }}
     >
-      <svg
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          overflow: "visible",
-        }}
-        viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
-        preserveAspectRatio="none"
-      >
-        {/* Main bubble */}
-        <path
-          d={bubbleData.main}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-          strokeLinejoin="round"
-        />
-        {/* Thought bubble circles (if thought type) */}
-        {bubbleData.thoughtCircles?.map((circle, i) => (
-          <circle
-            key={i}
-            cx={circle.x}
-            cy={circle.y}
-            r={circle.r}
+      {/* SVG shape - hidden when unified overlay handles the shape */}
+      {!hideShape && (
+        <svg
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            overflow: "visible",
+          }}
+          viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
+          preserveAspectRatio="none"
+        >
+          {/* Main bubble */}
+          <path
+            d={bubbleData.main}
             fill={fill}
             stroke={stroke}
             strokeWidth={strokeWidth}
+            strokeLinejoin="round"
+            style={{ paintOrder: "stroke fill" }}
           />
-        ))}
-      </svg>
+          {/* Thought bubble circles (if thought type) */}
+          {bubbleData.thoughtCircles?.map((circle, i) => (
+            <circle
+              key={i}
+              cx={circle.x}
+              cy={circle.y}
+              r={circle.r}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth={strokeWidth}
+              style={{ paintOrder: "stroke fill" }}
+            />
+          ))}
+        </svg>
+      )}
 
       {/* Content */}
       <div
