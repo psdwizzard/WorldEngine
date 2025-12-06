@@ -19,6 +19,7 @@ import sharp from "sharp";
 import { writePsd, Layer, Psd } from "ag-psd";
 import { loadEnv } from "../lib/env";
 import type { EnvConfig } from "../lib/env";
+import { buildConnectorGeometry, computeBubbleFontSize } from "@worldengine/shared";
 import { upload } from "../middleware/upload";
 
 /**
@@ -1342,41 +1343,20 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
       if (!parentBubble) continue;
 
       try {
-        // Use the same unified connector shape as PNG export (center-to-center, tapered quad)
-        const childCenterX = (bubble.geometry.x + bubble.geometry.width / 2) * psdWidth;
-        const childCenterY = (bubble.geometry.y + bubble.geometry.height / 2) * psdHeight;
-        const parentCenterX = (parentBubble.geometry.x + parentBubble.geometry.width / 2) * psdWidth;
-        const parentCenterY = (parentBubble.geometry.y + parentBubble.geometry.height / 2) * psdHeight;
+        const shape = buildConnectorGeometry({
+          childCx: (bubble.geometry.x + bubble.geometry.width / 2) * psdWidth,
+          childCy: (bubble.geometry.y + bubble.geometry.height / 2) * psdHeight,
+          parentCx: (parentBubble.geometry.x + parentBubble.geometry.width / 2) * psdWidth,
+          parentCy: (parentBubble.geometry.y + parentBubble.geometry.height / 2) * psdHeight,
+          strokeWidth: bubble.strokeWidth ?? 2,
+          canvasWidth: psdWidth,
+          canvasHeight: psdHeight,
+          exportScale,
+          curveFlip: bubble.linkedCurveFlip,
+        });
 
-        const dx = parentCenterX - childCenterX;
-        const dy = parentCenterY - childCenterY;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const dirX = dx / dist;
-        const dirY = dy / dist;
-        const nx = -dirY;
-        const ny = dirX;
-
-        // Connector width - match PNG's thicker connectors (export matches canvas)
-        const connectorScale = Math.min(psdWidth, psdHeight) * 0.012;
-        const tipWide = connectorScale;
-        const tipNarrow = connectorScale * 0.5;
-        
-        // Stroke width for unified outline
-        const strokeW = Math.max(1, Math.round((bubble.strokeWidth ?? 2) * exportScale));
-
-        // Curved ribbon
-        const curviness = dist * 0.15;
-        const ctrlX = (childCenterX + parentCenterX) * 0.5 + nx * curviness;
-        const ctrlY = (childCenterY + parentCenterY) * 0.5 + ny * curviness;
-
-        const p1x = childCenterX + nx * tipWide * 0.5;
-        const p1y = childCenterY + ny * tipWide * 0.5;
-        const p2x = parentCenterX + nx * tipNarrow * 0.5;
-        const p2y = parentCenterY + ny * tipNarrow * 0.5;
-        const p3x = parentCenterX - nx * tipNarrow * 0.5;
-        const p3y = parentCenterY - ny * tipNarrow * 0.5;
-        const p4x = childCenterX - nx * tipWide * 0.5;
-        const p4y = childCenterY - ny * tipWide * 0.5;
+        const { p1x, p1y, p2x, p2y, p3x, p3y, p4x, p4y, ctrlX, ctrlY } = shape.points;
+        const strokeW = Math.max(1, Math.round(shape.strokeW));
 
         // Bounding box with stroke margin
         const allX = [p1x, p2x, p3x, p4x, ctrlX];
@@ -1399,9 +1379,8 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
 
         const fill = bubble.fill ?? "#ffffff";
         const stroke = bubble.stroke ?? "#000000";
-
-        // Connector with fill AND stroke (bubble fills will cover internal seams)
         const connectorPath = `M ${lp1x} ${lp1y} Q ${lcx} ${lcy} ${lp2x} ${lp2y} L ${lp3x} ${lp3y} Q ${lcx} ${lcy} ${lp4x} ${lp4y} Z`;
+
         // Outline layer
         {
           const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}">
@@ -1619,7 +1598,7 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
 
         // Add bubble text layer
       if (bubble.text) {
-        const fontSize = Math.round((bubble.fontSize ?? 0.85) * 16 * exportScale);
+        const fontSize = Math.round(computeBubbleFontSize(bubble.fontSize, exportScale));
           const fontFamily = bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif";
           const lineHeight = Math.round(fontSize * 1.2);
 

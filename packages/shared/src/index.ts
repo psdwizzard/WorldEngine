@@ -184,6 +184,8 @@ export interface StoryboardBubble {
   tailLength: number;
   /** ID of another bubble this one links FROM (for chained dialogue). */
   linkedToId?: UUID;
+  /** Flip connector arc (true inverts the bend direction). */
+  linkedCurveFlip?: boolean;
   /** Z-index order (higher = on top). */
   order: number;
   createdAt: string;
@@ -270,3 +272,5 @@ export interface ProjectSummary {
   updatedAt: string;
   promptPresets?: PromptPresetSet;
 }
+
+export { buildConnectorGeometry, computeBubbleFontSize } from "./bubbleLayout";
