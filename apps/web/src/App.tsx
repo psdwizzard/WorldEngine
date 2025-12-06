@@ -4532,6 +4532,50 @@ function PanelsTab({
         ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
         ctx.stroke();
       }
+
+      // Draw parent tips so speaker direction remains visible when linked
+      for (const bubble of bubbles) {
+        const hasChild = bubbles.some((b) => b.linkedToId === bubble.id);
+        // Only roots (no parent) should draw tips
+        if (!hasChild || bubble.linkedToId) continue;
+
+        const cx = (bubble.geometry.x + bubble.geometry.width / 2) * width;
+        const cy = (bubble.geometry.y + bubble.geometry.height / 2) * height;
+        // Match ellipse inset so base meets bubble edge cleanly
+        const rx = (bubble.geometry.width / 2) * width * 0.9;
+        const ry = (bubble.geometry.height / 2) * height * 0.9;
+        const rMin = Math.min(rx, ry);
+
+        const tailAngle = (bubble.tailAngle ?? 240) * (Math.PI / 180);
+        const spread = 12 * (Math.PI / 180);
+        const angle1 = tailAngle - spread;
+        const angle2 = tailAngle + spread;
+
+        const base1X = cx + rx * Math.cos(angle1);
+        const base1Y = cy + ry * Math.sin(angle1);
+        const base2X = cx + rx * Math.cos(angle2);
+        const base2Y = cy + ry * Math.sin(angle2);
+        const strokeW = (bubble.strokeWidth ?? 2) * exportScaleX;
+        const tailLen = rMin * Math.max(0.05, bubble.tailLength ?? 0.3) + strokeW * 0.5;
+        const tipX = cx + (rMin + tailLen) * Math.cos(tailAngle);
+        const tipY = cy + (rMin + tailLen) * Math.sin(tailAngle);
+
+        ctx.save();
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.lineWidth = strokeW;
+        ctx.strokeStyle = bubble.stroke;
+        ctx.fillStyle = bubble.fill;
+
+        ctx.beginPath();
+        ctx.moveTo(base1X, base1Y);
+        ctx.lineTo(tipX, tipY);
+        ctx.lineTo(base2X, base2Y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
       ctx.restore();
 
       // LAYER 2: Fill all tails and linked bubble ellipses (covers internal strokes)
@@ -4583,6 +4627,41 @@ function PanelsTab({
         ctx.quadraticCurveTo(ctrlX, ctrlY, p2x, p2y);
         ctx.lineTo(p3x, p3y);
         ctx.quadraticCurveTo(ctrlX, ctrlY, p4x, p4y);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Fill parent tips after ellipses so they sit on top
+      for (const bubble of bubbles) {
+        const hasChild = bubbles.some((b) => b.linkedToId === bubble.id);
+        if (!hasChild) continue;
+
+        const cx = (bubble.geometry.x + bubble.geometry.width / 2) * width;
+        const cy = (bubble.geometry.y + bubble.geometry.height / 2) * height;
+        // Use full radius for tips so they are not pulled inward
+        const rx = (bubble.geometry.width / 2) * width;
+        const ry = (bubble.geometry.height / 2) * height;
+        const rMin = Math.min(rx, ry);
+
+        const tailAngle = (bubble.tailAngle ?? 240) * (Math.PI / 180);
+        const spread = 12 * (Math.PI / 180);
+        const angle1 = tailAngle - spread;
+        const angle2 = tailAngle + spread;
+
+        const base1X = cx + rx * Math.cos(angle1);
+        const base1Y = cy + ry * Math.sin(angle1);
+        const base2X = cx + rx * Math.cos(angle2);
+        const base2Y = cy + ry * Math.sin(angle2);
+        const strokeW = (bubble.strokeWidth ?? 2) * exportScaleX;
+        const tailLen = rMin * (bubble.tailLength ?? 0.3) + strokeW * 2;
+        const tipX = cx + (rMin + tailLen) * Math.cos(tailAngle);
+        const tipY = cy + (rMin + tailLen) * Math.sin(tailAngle);
+
+        ctx.fillStyle = bubble.fill;
+        ctx.beginPath();
+        ctx.moveTo(base1X, base1Y);
+        ctx.lineTo(tipX, tipY);
+        ctx.lineTo(base2X, base2Y);
         ctx.closePath();
         ctx.fill();
       }
@@ -5672,12 +5751,17 @@ function PanelsTab({
               if (linked.length === 0) return null;
 
               const linkedIds = new Set<string>();
+              const parentIds = new Set<string>();
               linked.forEach((b) => {
                 linkedIds.add(b.id);
-                if (b.linkedToId) linkedIds.add(b.linkedToId);
+                if (b.linkedToId) {
+                  linkedIds.add(b.linkedToId);
+                  parentIds.add(b.linkedToId);
+                }
               });
 
               const tails: Array<{ d: string; stroke: string; strokeWidth: number; fill: string; key: string }> = [];
+              const parentTips: Array<{ d: string; stroke: string; strokeWidth: number; fill: string; key: string }> = [];
               const ellipses: Array<{ cx: number; cy: number; rx: number; ry: number; fill: string; stroke: string; strokeWidth: number; key: string }> = [];
 
               // Build tails (connector quads) in viewBox 100 space
@@ -5732,6 +5816,43 @@ function PanelsTab({
                 tails.push({ d, stroke: child.stroke, strokeWidth: strokeW, fill: child.fill, key: `tail-${child.id}` });
               }
 
+              // Parent tips (keep speaker pointer on parent bubbles)
+              (page.bubbles ?? [])
+                .filter((b) => parentIds.has(b.id))
+                .forEach((b) => {
+                  // Only draw tip on true parent (has child but no parent)
+                  if (b.linkedToId) return;
+                  const cx = (b.geometry.x + b.geometry.width / 2) * 100;
+                  const cy = (b.geometry.y + b.geometry.height / 2) * 100;
+                  // Match ellipse inset so base meets bubble edge cleanly
+                  const rx = (b.geometry.width / 2) * 100 * 0.9;
+                  const ry = (b.geometry.height / 2) * 100 * 0.9;
+                  const rMin = Math.min(rx, ry);
+
+                  const tailAngle = (b.tailAngle ?? 240) * (Math.PI / 180);
+                  const spread = 12 * (Math.PI / 180);
+                  const angle1 = tailAngle - spread;
+                  const angle2 = tailAngle + spread;
+
+                  const base1X = cx + rx * Math.cos(angle1);
+                  const base1Y = cy + ry * Math.sin(angle1);
+                  const base2X = cx + rx * Math.cos(angle2);
+                  const base2Y = cy + ry * Math.sin(angle2);
+                  const strokeW = b.strokeWidth ?? 2;
+                  const tailLen = rMin * Math.max(0.05, b.tailLength ?? 0.3) + strokeW * 0.5;
+                  const tipX = cx + (rMin + tailLen) * Math.cos(tailAngle);
+                  const tipY = cy + (rMin + tailLen) * Math.sin(tailAngle);
+
+                  const d = `M ${base1X} ${base1Y} L ${tipX} ${tipY} L ${base2X} ${base2Y} Z`;
+                  parentTips.push({
+                    d,
+                    stroke: b.stroke,
+                    strokeWidth: strokeW,
+                    fill: b.fill,
+                    key: `ptip-${b.id}`,
+                  });
+                });
+
               // Bubble ellipses for linked bubbles (slightly inset to sit under outline)
               (page.bubbles ?? [])
                 .filter((b) => linkedIds.has(b.id))
@@ -5775,6 +5896,9 @@ function PanelsTab({
                     {ellipses.map((b) => (
                       <ellipse key={`ol-${b.key}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} vectorEffect="non-scaling-stroke" />
                     ))}
+                    {parentTips.map((t) => (
+                      <path key={`ol-${t.key}`} d={t.d} vectorEffect="non-scaling-stroke" />
+                    ))}
                   </g>
 
                   {/* Fill layer */}
@@ -5783,6 +5907,9 @@ function PanelsTab({
                   ))}
                   {ellipses.map((b) => (
                     <ellipse key={`fill-${b.key}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} fill={b.fill} stroke="none" />
+                  ))}
+                  {parentTips.map((t) => (
+                    <path key={`fill-${t.key}`} d={t.d} fill={t.fill} stroke="none" />
                   ))}
                 </svg>
               );
