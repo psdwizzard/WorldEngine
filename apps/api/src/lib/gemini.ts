@@ -37,7 +37,7 @@ export async function generateImage(
   // Append resolution instruction to the prompt to override input image aspect ratio
   const promptWithDimensions = `${request.prompt} \n\nOutput resolution: ${width}x${height}.`;
 
-  const promptParts: Array<string | Part> = [promptWithDimensions];
+  const promptParts: Part[] = [{ text: promptWithDimensions }];
   if (request.imageInput) {
     promptParts.push({
       inlineData: {
@@ -47,17 +47,10 @@ export async function generateImage(
     });
   }
 
-  // Note: outputImageDimensions is not supported by all models (e.g., gemini-2.5-flash-image)
-  // We rely on the dimension instruction appended to the prompt instead
-  const generationConfig: Record<string, unknown> = {
-    responseMimeType: "image/png",
-  };
-
   try {
     console.log(`gemini:generate_image model=${modelName} size=${width}x${height}`);
     const result = await model.generateContent({
       contents: [{ role: "user", parts: promptParts }],
-      generationConfig,
     });
     const aiDescription = extractAiDescription(result.response);
     const inlineImage = extractInlineImage(result.response);
