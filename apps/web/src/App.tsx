@@ -4492,6 +4492,11 @@ function PanelsTab({
         const endX = parentCx;
         const endY = parentCy;
 
+        // Curved ribbon: bend toward normal at mid-point
+        const curviness = dist * 0.15;
+        const ctrlX = (startX + endX) * 0.5 + nx * curviness;
+        const ctrlY = (startY + endY) * 0.5 + ny * curviness;
+
         const p1x = startX + nx * TIP_WIDE * 0.5;
         const p1y = startY + ny * TIP_WIDE * 0.5;
         const p2x = endX + nx * TIP_NARROW * 0.5;
@@ -4505,9 +4510,9 @@ function PanelsTab({
         ctx.strokeStyle = childBubble.stroke;
         ctx.beginPath();
         ctx.moveTo(p1x, p1y);
-        ctx.lineTo(p2x, p2y);
+        ctx.quadraticCurveTo(ctrlX, ctrlY, p2x, p2y);
         ctx.lineTo(p3x, p3y);
-        ctx.lineTo(p4x, p4y);
+        ctx.quadraticCurveTo(ctrlX, ctrlY, p4x, p4y);
         ctx.closePath();
         ctx.stroke();
       }
@@ -4558,6 +4563,11 @@ function PanelsTab({
         const endX = parentCx;
         const endY = parentCy;
 
+        // Curved ribbon: bend toward normal at mid-point
+        const curviness = dist * 0.15;
+        const ctrlX = (startX + endX) * 0.5 + nx * curviness;
+        const ctrlY = (startY + endY) * 0.5 + ny * curviness;
+
         const p1x = startX + nx * TIP_WIDE * 0.5;
         const p1y = startY + ny * TIP_WIDE * 0.5;
         const p2x = endX + nx * TIP_NARROW * 0.5;
@@ -4570,9 +4580,9 @@ function PanelsTab({
         ctx.fillStyle = childBubble.fill;
         ctx.beginPath();
         ctx.moveTo(p1x, p1y);
-        ctx.lineTo(p2x, p2y);
+        ctx.quadraticCurveTo(ctrlX, ctrlY, p2x, p2y);
         ctx.lineTo(p3x, p3y);
-        ctx.lineTo(p4x, p4y);
+        ctx.quadraticCurveTo(ctrlX, ctrlY, p4x, p4y);
         ctx.closePath();
         ctx.fill();
       }
@@ -5693,10 +5703,10 @@ function PanelsTab({
                 const nx = -dirY;
                 const ny = dirX;
 
-                const strokeW = child.strokeWidth ?? 2;
-                // 75% slimmer connector (25% of original tip widths)
-                const TIP_WIDE = strokeW * 1.25;
-                const TIP_NARROW = strokeW * 0.625;
+        const strokeW = child.strokeWidth ?? 2;
+        // 75% slimmer connector (25% of original tip widths)
+        const TIP_WIDE = strokeW * 1.25;
+        const TIP_NARROW = strokeW * 0.625;
 
                 // Move endpoints to CENTER of bubbles to completely hide seams
                 const startX = childCx;
@@ -5704,16 +5714,21 @@ function PanelsTab({
                 const endX = parentCx;
                 const endY = parentCy;
 
-                const p1x = startX + nx * TIP_WIDE * 0.5;
-                const p1y = startY + ny * TIP_WIDE * 0.5;
-                const p2x = endX + nx * TIP_NARROW * 0.5;
-                const p2y = endY + ny * TIP_NARROW * 0.5;
-                const p3x = endX - nx * TIP_NARROW * 0.5;
-                const p3y = endY - ny * TIP_NARROW * 0.5;
-                const p4x = startX - nx * TIP_WIDE * 0.5;
-                const p4y = startY - ny * TIP_WIDE * 0.5;
+        // Curved ribbon: bend toward normal at mid-point
+        const curviness = dist * 0.15;
+        const ctrlX = (startX + endX) * 0.5 + nx * curviness;
+        const ctrlY = (startY + endY) * 0.5 + ny * curviness;
 
-                const d = `M ${p1x} ${p1y} L ${p2x} ${p2y} L ${p3x} ${p3y} L ${p4x} ${p4y} Z`;
+        const p1x = startX + nx * TIP_WIDE * 0.5;
+        const p1y = startY + ny * TIP_WIDE * 0.5;
+        const p2x = endX + nx * TIP_NARROW * 0.5;
+        const p2y = endY + ny * TIP_NARROW * 0.5;
+        const p3x = endX - nx * TIP_NARROW * 0.5;
+        const p3y = endY - ny * TIP_NARROW * 0.5;
+        const p4x = startX - nx * TIP_WIDE * 0.5;
+        const p4y = startY - ny * TIP_WIDE * 0.5;
+
+        const d = `M ${p1x} ${p1y} Q ${ctrlX} ${ctrlY} ${p2x} ${p2y} L ${p3x} ${p3y} Q ${ctrlX} ${ctrlY} ${p4x} ${p4y} Z`;
                 tails.push({ d, stroke: child.stroke, strokeWidth: strokeW, fill: child.fill, key: `tail-${child.id}` });
               }
 
