@@ -19,7 +19,13 @@ import sharp from "sharp";
 import { writePsd, Layer, Psd } from "ag-psd";
 import { loadEnv } from "../lib/env";
 import type { EnvConfig } from "../lib/env";
-import { buildConnectorGeometry, computeBubbleFontSize } from "@worldengine/shared";
+import { 
+  buildConnectorGeometry, 
+  computeBubbleFontSize,
+  buildParentTipGeometry,
+  generateSpeechBubbleSvg,
+  DEFAULT_STROKE_WIDTH,
+} from "@worldengine/shared";
 import { upload } from "../middleware/upload";
 
 /**
@@ -942,6 +948,7 @@ const exportPsdSchema = z.object({
   filename: z.string().optional(),
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
+  displayWidth: z.number().int().positive().optional(), // UI canvas display width for font/stroke scaling
   comicName: z.string().optional(), // Override for folder name (defaults to projectSlug)
   issueName: z.string().optional(), // Override for issue folder (defaults to page.issueLabel)
 });
@@ -1169,9 +1176,11 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
     }
 
     // Create caption box layers
-    // Scale factor for fonts/strokes: match PNG export scaling (target ~1988px)
-    const targetWidth = 1988;
-    const exportScale = psdWidth / targetWidth;
+    // Scale factor for fonts/strokes: match PNG export scaling
+    // PNG uses: exportScaleX = exportWidth / displayWidth
+    // Use the actual UI display width if provided, otherwise fall back to export width (scale = 1)
+    const displayWidth = parsed.data.displayWidth ?? psdWidth;
+    const exportScale = psdWidth / displayWidth;
 
     const captionBoxes = page.captionBoxes ?? [];
     for (const caption of captionBoxes) {
@@ -1336,91 +1345,387 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
       }
     });
 
-    // Create bubble connector layers FIRST with stroke+fill (mirrors PNG overlay)
+    // ========================================================================
+    // TWO-LAYER APPROACH (matches PNG export):
+    // LAYER 1: All strokes first (connectors, ellipses, tips)
+    // LAYER 2: All fills on top (covers internal stroke seams)
+    // ========================================================================
+
+    // LAYER 1A: Connector strokes
     for (const bubble of bubbles) {
       if (!bubble.linkedToId) continue;
       const parentBubble = bubbles.find((b) => b.id === bubble.linkedToId);
       if (!parentBubble) continue;
 
       try {
-        const shape = buildConnectorGeometry({
+        const geom = buildConnectorGeometry({
           childCx: (bubble.geometry.x + bubble.geometry.width / 2) * psdWidth,
           childCy: (bubble.geometry.y + bubble.geometry.height / 2) * psdHeight,
           parentCx: (parentBubble.geometry.x + parentBubble.geometry.width / 2) * psdWidth,
           parentCy: (parentBubble.geometry.y + parentBubble.geometry.height / 2) * psdHeight,
-          strokeWidth: bubble.strokeWidth ?? 2,
+          strokeWidth: bubble.strokeWidth ?? DEFAULT_STROKE_WIDTH,
           canvasWidth: psdWidth,
           canvasHeight: psdHeight,
           exportScale,
           curveFlip: bubble.linkedCurveFlip,
         });
 
-        const { p1x, p1y, p2x, p2y, p3x, p3y, p4x, p4y, ctrlX, ctrlY } = shape.points;
-        const strokeW = Math.max(1, Math.round(shape.strokeW));
-
-        // Bounding box with stroke margin
-        const allX = [p1x, p2x, p3x, p4x, ctrlX];
-        const allY = [p1y, p2y, p3y, p4y, ctrlY];
-        const margin = strokeW * 2;
+        // Bounding box
+        const allX = [geom.p1x, geom.p2x, geom.p3x, geom.p4x, geom.ctrlX];
+        const allY = [geom.p1y, geom.p2y, geom.p3y, geom.p4y, geom.ctrlY];
+        const margin = geom.strokeW * 2;
         const minX = Math.min(...allX) - margin;
         const minY = Math.min(...allY) - margin;
         const maxX = Math.max(...allX) + margin;
         const maxY = Math.max(...allY) + margin;
-
         const svgW = Math.max(4, Math.ceil(maxX - minX));
         const svgH = Math.max(4, Math.ceil(maxY - minY));
 
         // Local coords
-        const lp1x = p1x - minX, lp1y = p1y - minY;
-        const lp2x = p2x - minX, lp2y = p2y - minY;
-        const lp3x = p3x - minX, lp3y = p3y - minY;
-        const lp4x = p4x - minX, lp4y = p4y - minY;
-        const lcx = ctrlX - minX, lcy = ctrlY - minY;
+        const lp1x = geom.p1x - minX, lp1y = geom.p1y - minY;
+        const lp2x = geom.p2x - minX, lp2y = geom.p2y - minY;
+        const lp3x = geom.p3x - minX, lp3y = geom.p3y - minY;
+        const lp4x = geom.p4x - minX, lp4y = geom.p4y - minY;
+        const lcx = geom.ctrlX - minX, lcy = geom.ctrlY - minY;
+        const localPath = `M ${lp1x} ${lp1y} Q ${lcx} ${lcy} ${lp2x} ${lp2y} L ${lp3x} ${lp3y} Q ${lcx} ${lcy} ${lp4x} ${lp4y} Z`;
 
-        const fill = bubble.fill ?? "#ffffff";
-        const stroke = bubble.stroke ?? "#000000";
-        const connectorPath = `M ${lp1x} ${lp1y} Q ${lcx} ${lcy} ${lp2x} ${lp2y} L ${lp3x} ${lp3y} Q ${lcx} ${lcy} ${lp4x} ${lp4y} Z`;
+        const strokeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}">
+          <path d="${localPath}" fill="none" stroke="${bubble.stroke ?? "#000000"}" stroke-width="${geom.strokeW}" stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>`;
 
-        // Outline layer
-        {
-          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}">
-            <path d="${connectorPath}" fill="none" stroke="${stroke}" stroke-width="${strokeW}" stroke-linejoin="round" stroke-linecap="round"/>
-          </svg>`;
-          const buf = await sharp(Buffer.from(svg)).png().toBuffer();
-          const img = await sharpToImageData(buf);
-          layers.push({
-            name: "Bubble Connector Outline",
-            imageData: img,
-            left: Math.round(minX),
-            top: Math.round(minY),
-            opacity: 1,
-            blendMode: "normal",
-          });
-        }
-        // Fill layer
-        {
-          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}">
-            <path d="${connectorPath}" fill="${fill}" stroke="none"/>
-          </svg>`;
-          const buf = await sharp(Buffer.from(svg)).png().toBuffer();
-          const img = await sharpToImageData(buf);
-          layers.push({
-            name: "Bubble Connector Fill",
-            imageData: img,
-            left: Math.round(minX),
-            top: Math.round(minY),
-            opacity: 1,
-            blendMode: "normal",
-          });
-        }
-      } catch (connectorErr) {
-        console.warn("Bubble connector layer failed:", connectorErr);
+        const buf = await sharp(Buffer.from(strokeSvg)).png().toBuffer();
+        const img = await sharpToImageData(buf);
+        layers.push({
+          name: "Connector Stroke",
+          imageData: img,
+          left: Math.round(minX),
+          top: Math.round(minY),
+          opacity: 1,
+          blendMode: "normal",
+        });
+      } catch (err) {
+        console.warn("Connector stroke failed:", err);
       }
     }
 
-    // Create speech/thought bubble layers (AFTER connectors, so bubble strokes cover connector seams)
-    // All coordinates calculated directly in pixel space (no viewBox scaling)
+    // LAYER 1B: Linked bubble ellipse strokes
     for (const bubble of bubbles) {
+      if (!linkedBubbleIds.has(bubble.id)) continue;
+
+      const bubX = Math.round(bubble.geometry.x * psdWidth);
+      const bubY = Math.round(bubble.geometry.y * psdHeight);
+      const bubW = Math.round(bubble.geometry.width * psdWidth);
+      const bubH = Math.round(bubble.geometry.height * psdHeight);
+      // Match PNG: no Math.round/Math.max so stroke scales properly
+      const sw = (bubble.strokeWidth ?? DEFAULT_STROKE_WIDTH) * exportScale;
+
+      // Ellipse centered in bubble box (no tail offset for linked)
+      const cx = bubW / 2;
+      const cy = bubH / 2;
+      const rx = bubW / 2 * 0.9;
+      const ry = bubH / 2 * 0.9;
+
+      try {
+        const strokeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${bubW}" height="${bubH}">
+          <ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="none" stroke="${bubble.stroke ?? "#000000"}" stroke-width="${sw}"/>
+        </svg>`;
+
+        const buf = await sharp(Buffer.from(strokeSvg)).png().toBuffer();
+        const img = await sharpToImageData(buf);
+        layers.push({
+          name: "Linked Bubble Stroke",
+          imageData: img,
+          left: bubX,
+          top: bubY,
+          opacity: 1,
+          blendMode: "normal",
+        });
+      } catch (err) {
+        console.warn("Linked bubble stroke failed:", err);
+      }
+    }
+
+    // LAYER 1C: Parent tip strokes (only root parents - have children but no linkedToId)
+    for (const bubble of bubbles) {
+      const hasChild = bubbles.some((b) => b.linkedToId === bubble.id);
+      if (!hasChild || bubble.linkedToId) continue;
+
+      const bubX = Math.round(bubble.geometry.x * psdWidth);
+      const bubY = Math.round(bubble.geometry.y * psdHeight);
+      const bubW = Math.round(bubble.geometry.width * psdWidth);
+      const bubH = Math.round(bubble.geometry.height * psdHeight);
+
+      // Use shared geometry function (matches PNG exactly)
+      const cx = bubW / 2;
+      const cy = bubH / 2;
+      const rx = bubW / 2 * 0.9;
+      const ry = bubH / 2 * 0.9;
+      const sw = (bubble.strokeWidth ?? DEFAULT_STROKE_WIDTH) * exportScale;
+
+      const tipGeom = buildParentTipGeometry({
+        cx,
+        cy,
+        rx,
+        ry,
+        tailAngle: bubble.tailAngle ?? 240,
+        tailLength: bubble.tailLength ?? 0.3,
+        strokeWidth: sw,
+      });
+
+      // Tip can extend beyond bubble bounds - calculate actual bounding box
+      const tipPoints = [
+        { x: tipGeom.base1X, y: tipGeom.base1Y },
+        { x: tipGeom.base2X, y: tipGeom.base2Y },
+        { x: tipGeom.tipX, y: tipGeom.tipY },
+      ];
+      const margin = sw * 2;
+      const minTipX = Math.min(...tipPoints.map(p => p.x)) - margin;
+      const minTipY = Math.min(...tipPoints.map(p => p.y)) - margin;
+      const maxTipX = Math.max(...tipPoints.map(p => p.x)) + margin;
+      const maxTipY = Math.max(...tipPoints.map(p => p.y)) + margin;
+      const tipSvgW = Math.max(4, Math.ceil(maxTipX - minTipX));
+      const tipSvgH = Math.max(4, Math.ceil(maxTipY - minTipY));
+
+      // Offset path to local SVG coordinates
+      const localTipPath = `M ${tipGeom.base1X - minTipX} ${tipGeom.base1Y - minTipY} L ${tipGeom.tipX - minTipX} ${tipGeom.tipY - minTipY} L ${tipGeom.base2X - minTipX} ${tipGeom.base2Y - minTipY} Z`;
+
+      try {
+        const tipSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${tipSvgW}" height="${tipSvgH}">
+          <path d="${localTipPath}" fill="none" stroke="${bubble.stroke ?? "#000000"}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>`;
+
+        const buf = await sharp(Buffer.from(tipSvg)).png().toBuffer();
+        const img = await sharpToImageData(buf);
+        layers.push({
+          name: "Parent Tip Stroke",
+          imageData: img,
+          left: bubX + Math.round(minTipX),
+          top: bubY + Math.round(minTipY),
+          opacity: 1,
+          blendMode: "normal",
+        });
+      } catch (err) {
+        console.warn("Parent tip stroke failed:", err);
+      }
+    }
+
+    // LAYER 2A: Connector fills (covers internal strokes)
+    for (const bubble of bubbles) {
+      if (!bubble.linkedToId) continue;
+      const parentBubble = bubbles.find((b) => b.id === bubble.linkedToId);
+      if (!parentBubble) continue;
+
+      try {
+        const geom = buildConnectorGeometry({
+          childCx: (bubble.geometry.x + bubble.geometry.width / 2) * psdWidth,
+          childCy: (bubble.geometry.y + bubble.geometry.height / 2) * psdHeight,
+          parentCx: (parentBubble.geometry.x + parentBubble.geometry.width / 2) * psdWidth,
+          parentCy: (parentBubble.geometry.y + parentBubble.geometry.height / 2) * psdHeight,
+          strokeWidth: bubble.strokeWidth ?? DEFAULT_STROKE_WIDTH,
+          canvasWidth: psdWidth,
+          canvasHeight: psdHeight,
+          exportScale,
+          curveFlip: bubble.linkedCurveFlip,
+        });
+
+        const allX = [geom.p1x, geom.p2x, geom.p3x, geom.p4x, geom.ctrlX];
+        const allY = [geom.p1y, geom.p2y, geom.p3y, geom.p4y, geom.ctrlY];
+        const margin = 4;
+        const minX = Math.min(...allX) - margin;
+        const minY = Math.min(...allY) - margin;
+        const maxX = Math.max(...allX) + margin;
+        const maxY = Math.max(...allY) + margin;
+        const svgW = Math.max(4, Math.ceil(maxX - minX));
+        const svgH = Math.max(4, Math.ceil(maxY - minY));
+
+        const lp1x = geom.p1x - minX, lp1y = geom.p1y - minY;
+        const lp2x = geom.p2x - minX, lp2y = geom.p2y - minY;
+        const lp3x = geom.p3x - minX, lp3y = geom.p3y - minY;
+        const lp4x = geom.p4x - minX, lp4y = geom.p4y - minY;
+        const lcx = geom.ctrlX - minX, lcy = geom.ctrlY - minY;
+        const localPath = `M ${lp1x} ${lp1y} Q ${lcx} ${lcy} ${lp2x} ${lp2y} L ${lp3x} ${lp3y} Q ${lcx} ${lcy} ${lp4x} ${lp4y} Z`;
+
+        const fillSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}">
+          <path d="${localPath}" fill="${bubble.fill ?? "#ffffff"}" stroke="none"/>
+        </svg>`;
+
+        const buf = await sharp(Buffer.from(fillSvg)).png().toBuffer();
+        const img = await sharpToImageData(buf);
+        layers.push({
+          name: "Connector Fill",
+          imageData: img,
+          left: Math.round(minX),
+          top: Math.round(minY),
+          opacity: 1,
+          blendMode: "normal",
+        });
+      } catch (err) {
+        console.warn("Connector fill failed:", err);
+      }
+    }
+
+    // LAYER 2B: Linked bubble ellipse fills (covers connector stroke seams)
+    for (const bubble of bubbles) {
+      if (!linkedBubbleIds.has(bubble.id)) continue;
+
+      const bubX = Math.round(bubble.geometry.x * psdWidth);
+      const bubY = Math.round(bubble.geometry.y * psdHeight);
+      const bubW = Math.round(bubble.geometry.width * psdWidth);
+      const bubH = Math.round(bubble.geometry.height * psdHeight);
+
+      const cx = bubW / 2;
+      const cy = bubH / 2;
+      const rx = bubW / 2 * 0.9;
+      const ry = bubH / 2 * 0.9;
+
+      try {
+        const fillSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${bubW}" height="${bubH}">
+          <ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${bubble.fill ?? "#ffffff"}" stroke="none"/>
+        </svg>`;
+
+        const buf = await sharp(Buffer.from(fillSvg)).png().toBuffer();
+        const img = await sharpToImageData(buf);
+        layers.push({
+          name: "Linked Bubble Fill",
+          imageData: img,
+          left: bubX,
+          top: bubY,
+          opacity: 1,
+          blendMode: "normal",
+        });
+      } catch (err) {
+        console.warn("Linked bubble fill failed:", err);
+      }
+    }
+
+    // LAYER 2C: Parent tip fills (after ellipse fills so tip stays visible)
+    for (const bubble of bubbles) {
+      const hasChild = bubbles.some((b) => b.linkedToId === bubble.id);
+      if (!hasChild || bubble.linkedToId) continue;
+
+      const bubX = Math.round(bubble.geometry.x * psdWidth);
+      const bubY = Math.round(bubble.geometry.y * psdHeight);
+      const bubW = Math.round(bubble.geometry.width * psdWidth);
+      const bubH = Math.round(bubble.geometry.height * psdHeight);
+
+      const cx = bubW / 2;
+      const cy = bubH / 2;
+      const rx = bubW / 2 * 0.9;
+      const ry = bubH / 2 * 0.9;
+      const sw = (bubble.strokeWidth ?? DEFAULT_STROKE_WIDTH) * exportScale;
+
+      const tipGeom = buildParentTipGeometry({
+        cx,
+        cy,
+        rx,
+        ry,
+        tailAngle: bubble.tailAngle ?? 240,
+        tailLength: bubble.tailLength ?? 0.3,
+        strokeWidth: sw,
+      });
+
+      // Tip can extend beyond bubble bounds - calculate actual bounding box
+      const tipPoints = [
+        { x: tipGeom.base1X, y: tipGeom.base1Y },
+        { x: tipGeom.base2X, y: tipGeom.base2Y },
+        { x: tipGeom.tipX, y: tipGeom.tipY },
+      ];
+      const margin = 4;
+      const minTipX = Math.min(...tipPoints.map(p => p.x)) - margin;
+      const minTipY = Math.min(...tipPoints.map(p => p.y)) - margin;
+      const maxTipX = Math.max(...tipPoints.map(p => p.x)) + margin;
+      const maxTipY = Math.max(...tipPoints.map(p => p.y)) + margin;
+      const tipSvgW = Math.max(4, Math.ceil(maxTipX - minTipX));
+      const tipSvgH = Math.max(4, Math.ceil(maxTipY - minTipY));
+
+      // Offset path to local SVG coordinates
+      const localTipPath = `M ${tipGeom.base1X - minTipX} ${tipGeom.base1Y - minTipY} L ${tipGeom.tipX - minTipX} ${tipGeom.tipY - minTipY} L ${tipGeom.base2X - minTipX} ${tipGeom.base2Y - minTipY} Z`;
+
+      try {
+        const tipSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${tipSvgW}" height="${tipSvgH}">
+          <path d="${localTipPath}" fill="${bubble.fill ?? "#ffffff"}" stroke="none"/>
+        </svg>`;
+
+        const buf = await sharp(Buffer.from(tipSvg)).png().toBuffer();
+        const img = await sharpToImageData(buf);
+        layers.push({
+          name: "Parent Tip Fill",
+          imageData: img,
+          left: bubX + Math.round(minTipX),
+          top: bubY + Math.round(minTipY),
+          opacity: 1,
+          blendMode: "normal",
+        });
+      } catch (err) {
+        console.warn("Parent tip fill failed:", err);
+      }
+    }
+
+    // LAYER 2D: Linked bubble text (on top of fills)
+    for (const bubble of bubbles) {
+      if (!linkedBubbleIds.has(bubble.id) || !bubble.text) continue;
+
+      const bubW = Math.round(bubble.geometry.width * psdWidth);
+      const bubH = Math.round(bubble.geometry.height * psdHeight);
+
+      try {
+        // Match PNG text layout
+        const fontSize = (bubble.fontSize ?? 0.85) * 16 * exportScale;
+        const lineHeight = fontSize * 1.2;
+        const textPadding = 0.1 * Math.min(bubW, bubH);
+        const maxTextW = Math.max(1, bubW - textPadding * 2);
+        const textAreaTop = bubH * 0.1;
+        const textAreaBottom = bubH * (0.7 - (bubble.tailLength ?? 0) * 0.2);
+        const textAreaHeight = Math.max(1, textAreaBottom - textAreaTop);
+        const charsPerLine = Math.max(3, Math.floor(maxTextW / (fontSize * 0.55)));
+
+        const words = bubble.text.split(/\s+/);
+        const lines: string[] = [];
+        let line = "";
+        for (const w of words) {
+          const test = line ? `${line} ${w}` : w;
+          if (test.length > charsPerLine && line) {
+            lines.push(line);
+            line = w;
+          } else {
+            line = test;
+          }
+        }
+        if (line) lines.push(line);
+
+        const totalH = lines.length * lineHeight;
+        const startY = textAreaTop + (textAreaHeight - totalH) / 2 + lineHeight / 2;
+
+        const tspans = lines.map((l, i) => {
+          const y = startY + i * lineHeight;
+          const escaped = l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          return `<tspan x="${bubW / 2}" y="${y}" text-anchor="middle">${escaped}</tspan>`;
+        }).join("");
+
+        const textSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${bubW}" height="${bubH}">
+          <text font-family="${bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif"}" font-size="${fontSize}" fill="#000000">${tspans}</text>
+        </svg>`;
+
+        const buf = await sharp(Buffer.from(textSvg)).png().toBuffer();
+        const img = await sharpToImageData(buf);
+        layers.push({
+          name: "Linked Bubble Text",
+          imageData: img,
+          left: Math.round(bubble.geometry.x * psdWidth),
+          top: Math.round(bubble.geometry.y * psdHeight),
+          opacity: 1,
+          blendMode: "normal",
+        });
+      } catch (err) {
+        console.warn("Linked bubble text failed:", err);
+      }
+    }
+
+    // Create NON-LINKED speech/thought bubble layers (linked handled above with two-layer approach)
+    for (const bubble of bubbles) {
+      // Skip linked bubbles - they're rendered above with stroke/fill separation
+      if (linkedBubbleIds.has(bubble.id)) continue;
+
       const bubX = Math.round(bubble.geometry.x * psdWidth);
       const bubY = Math.round(bubble.geometry.y * psdHeight);
       const bubW = Math.round(bubble.geometry.width * psdWidth);
@@ -1428,7 +1733,8 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
 
       const fill = bubble.fill ?? "#ffffff";
       const stroke = bubble.stroke ?? "#000000";
-      const sw = Math.max(1, Math.round((bubble.strokeWidth ?? 2) * exportScale));
+      // Match PNG: no Math.round/Math.max so stroke scales properly
+      const sw = (bubble.strokeWidth ?? DEFAULT_STROKE_WIDTH) * exportScale;
       const tailAngle = bubble.tailAngle ?? 240;
       const tailLength = bubble.tailLength ?? 0.3;
 
@@ -1440,12 +1746,9 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
       const rx = bubW / 2 - padding;
       const ry = bubH * (0.5 - tailLength * 0.15) - padding;
 
-      let bubbleSvg: string;
+      let bubbleSvg: string | undefined;
 
-      // Skip stroke/fill for linked bubbles; connectors/ellipses handle shape
-      if (bubble.linkedToId) {
-        // Only render text layer below
-      } else if (bubble.type === "thought") {
+      if (bubble.type === "thought") {
         // Thought bubble: main ellipse + 3 trailing circles
         // Use expanded canvas that can fit circles in any direction
         const angleRad = (tailAngle * Math.PI) / 180;
@@ -1502,14 +1805,18 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
             blendMode: "normal",
           });
 
-          // Add thought bubble text
+          // Add thought bubble text (match PNG text layout)
           if (bubble.text) {
-            const fontSize = Math.max(12, Math.round((bubble.fontSize ?? 0.85) * 16 * exportScale));
-            const fontFamily = bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif";
-            const lineHeight = Math.round(fontSize * 1.2);
-            const textW = ellipseRx * 1.5;
-            const charsPerLine = Math.max(3, Math.floor(textW / (fontSize * 0.55)));
-            
+            const fontSize = (bubble.fontSize ?? 0.85) * 16 * exportScale;
+            const lineHeight = fontSize * 1.2;
+            const textPadding = 0.1 * Math.min(bubW, bubH);
+            const maxTextW = Math.max(1, bubW - textPadding * 2);
+            // Use LOCAL coordinates (0-based within SVG), not page coordinates!
+            const textAreaTop = bubH * 0.1;
+            const textAreaBottom = bubH * (0.7 - tailLength * 0.2);
+            const textAreaHeight = Math.max(1, textAreaBottom - textAreaTop);
+            const charsPerLine = Math.max(3, Math.floor(maxTextW / (fontSize * 0.55)));
+
             const words = bubble.text.split(/\s+/);
             const lines: string[] = [];
             let line = "";
@@ -1525,8 +1832,7 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
             if (line) lines.push(line);
 
             const totalH = lines.length * lineHeight;
-            const textCenterY = bubH / 2;
-            const startY = textCenterY - totalH / 2 + fontSize * 0.8;
+            const startY = textAreaTop + (textAreaHeight - totalH) / 2 + lineHeight / 2;
 
             const tspans = lines.map((l, i) => {
               const y = startY + i * lineHeight;
@@ -1535,7 +1841,7 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
             }).join("");
 
             const textSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${bubW}" height="${bubH}">
-              <text font-family="${fontFamily}" font-size="${fontSize}" fill="#000000">${tspans}</text>
+              <text font-family="${bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif"}" font-size="${fontSize}" fill="#000000">${tspans}</text>
             </svg>`;
 
             try {
@@ -1558,53 +1864,53 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
         }
         continue;
       } else {
-        // Speech bubble: ellipse with pointed tail
-        const angleRad = (tailAngle * Math.PI) / 180;
-        const tailSpread = 15 * Math.PI / 180; // 15 degrees spread
-        const tailLen = tailLength * bubH * 0.6;
-
-        // Points where tail connects to ellipse
-        const base1X = cx + rx * Math.cos(angleRad - tailSpread);
-        const base1Y = cy + ry * Math.sin(angleRad - tailSpread);
-        const base2X = cx + rx * Math.cos(angleRad + tailSpread);
-        const base2Y = cy + ry * Math.sin(angleRad + tailSpread);
-        
-        // Tail tip
-        const tipX = cx + (rx + tailLen) * Math.cos(angleRad);
-        const tipY = cy + (ry + tailLen) * Math.sin(angleRad);
-
-        // SVG path: arc around most of ellipse, then tail triangle
-        const largeArc = 1; // Go the long way around
-        const sweep = 0; // Counter-clockwise
-        
-        bubbleSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${bubW}" height="${bubH}">
-          <path d="M ${base1X} ${base1Y} A ${rx} ${ry} 0 ${largeArc} ${sweep} ${base2X} ${base2Y} L ${tipX} ${tipY} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"/>
-        </svg>`;
+        // Speech bubble with tail using shared generator (matches PNG geometry)
+        bubbleSvg = generateSpeechBubbleSvg({
+          cx,
+          cy,
+          rx,
+          ry,
+          tailAngle,
+          tailLength,
+          fill,
+          stroke,
+          strokeWidth: sw,
+          width: bubW,
+          height: bubH,
+        });
       }
 
-      // This block only runs for speech bubbles (thought bubbles continue above)
-      try {
-        const bubbleBuffer = await sharp(Buffer.from(bubbleSvg)).png().toBuffer();
-        const bubbleImageData = await sharpToImageData(bubbleBuffer);
+      // Render non-linked bubble shape
+      if (bubbleSvg) {
+        try {
+          const bubbleBuffer = await sharp(Buffer.from(bubbleSvg)).png().toBuffer();
+          const bubbleImageData = await sharpToImageData(bubbleBuffer);
 
-        layers.push({
-          name: "Speech Bubble",
-          imageData: bubbleImageData,
-          left: bubX,
-          top: bubY,
-          opacity: 1,
-          blendMode: "normal",
-        });
+          layers.push({
+            name: "Bubble Shape",
+            imageData: bubbleImageData,
+            left: bubX,
+            top: bubY,
+            opacity: 1,
+            blendMode: "normal",
+          });
+        } catch (bubbleErr) {
+          console.warn("Bubble layer failed:", bubbleErr);
+        }
+      }
 
-        // Add bubble text layer
+      // Add bubble text layer for non-linked bubbles (match PNG text layout)
       if (bubble.text) {
-        const fontSize = Math.round(computeBubbleFontSize(bubble.fontSize, exportScale));
-          const fontFamily = bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif";
-          const lineHeight = Math.round(fontSize * 1.2);
-
-          // Text area
-          const textW = rx * 1.4;
-          const charsPerLine = Math.max(3, Math.floor(textW / (fontSize * 0.55)));
+        try {
+          const fontSize = (bubble.fontSize ?? 0.85) * 16 * exportScale;
+          const lineHeight = fontSize * 1.2;
+          const textPadding = 0.1 * Math.min(bubW, bubH);
+          const maxTextW = Math.max(1, bubW - textPadding * 2);
+          // Use LOCAL coordinates (0-based within SVG), not page coordinates!
+          const textAreaTop = bubH * 0.1;
+          const textAreaBottom = bubH * (0.7 - tailLength * 0.2);
+          const textAreaHeight = Math.max(1, textAreaBottom - textAreaTop);
+          const charsPerLine = Math.max(3, Math.floor(maxTextW / (fontSize * 0.55)));
           
           const words = bubble.text.split(/\s+/);
           const lines: string[] = [];
@@ -1620,37 +1926,32 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
           }
           if (line) lines.push(line);
 
-          // Center text vertically in ellipse
           const totalH = lines.length * lineHeight;
-          const startY = cy - totalH / 2 + fontSize * 0.8;
+          const startY = textAreaTop + (textAreaHeight - totalH) / 2 + lineHeight / 2;
 
           const tspans = lines.map((l, i) => {
             const y = startY + i * lineHeight;
             const escaped = l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            return `<tspan x="${cx}" y="${y}" text-anchor="middle">${escaped}</tspan>`;
+            return `<tspan x="${bubW / 2}" y="${y}" text-anchor="middle">${escaped}</tspan>`;
           }).join("");
 
           const textSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${bubW}" height="${bubH}">
-            <text font-family="${fontFamily}" font-size="${fontSize}" fill="#000000">${tspans}</text>
+            <text font-family="${bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif"}" font-size="${fontSize}" fill="#000000">${tspans}</text>
           </svg>`;
 
-          try {
-            const textBuffer = await sharp(Buffer.from(textSvg)).png().toBuffer();
-            const textImageData = await sharpToImageData(textBuffer);
-            layers.push({
-              name: `Bubble Text`,
-              imageData: textImageData,
-              left: bubX,
-              top: bubY,
-              opacity: 1,
-              blendMode: "normal",
-            });
-          } catch (textErr) {
-            console.warn("Bubble text failed:", textErr);
-          }
+          const textBuffer = await sharp(Buffer.from(textSvg)).png().toBuffer();
+          const textImageData = await sharpToImageData(textBuffer);
+          layers.push({
+            name: `Bubble Text`,
+            imageData: textImageData,
+            left: bubX,
+            top: bubY,
+            opacity: 1,
+            blendMode: "normal",
+          });
+        } catch (textErr) {
+          console.warn("Bubble text failed:", textErr);
         }
-      } catch (bubbleErr) {
-        console.warn("Bubble layer failed:", bubbleErr);
       }
     }
 

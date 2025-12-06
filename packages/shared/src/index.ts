@@ -273,4 +273,24 @@ export interface ProjectSummary {
   promptPresets?: PromptPresetSet;
 }
 
-export { buildConnectorGeometry, computeBubbleFontSize } from "./bubbleLayout";
+export { 
+  buildConnectorGeometry, 
+  computeBubbleFontSize,
+  buildParentTipGeometry,
+  generateConnectorSvg,
+  generateBubbleEllipseSvg,
+  generateSpeechBubbleSvg,
+  CONNECTOR_TIP_WIDE_SCALE,
+  CONNECTOR_TIP_NARROW_SCALE,
+  CONNECTOR_CURVE_FACTOR,
+  DEFAULT_STROKE_WIDTH,
+  DEFAULT_FONT_SIZE_REM,
+  TAIL_SPREAD_DEG,
+  SPEECH_TAIL_SCALE,
+  MIN_TAIL_LENGTH,
+  BUBBLE_VIEWBOX_WIDTH,
+  BUBBLE_VIEWBOX_HEIGHT,
+  BUBBLE_PADDING,
+  BUBBLE_TAIL_LIFT,
+} from "./bubbleLayout";
+export type { ConnectorInput, ConnectorGeometry, BubbleEllipseInput, BubbleTailInput, ParentTipGeometry } from "./bubbleLayout";

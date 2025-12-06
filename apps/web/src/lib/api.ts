@@ -864,6 +864,7 @@ export async function exportPageToPsd(input: {
   filename?: string;
   width?: number;
   height?: number;
+  displayWidth?: number; // UI canvas display width for consistent font/stroke scaling
   comicName?: string;
   issueName?: string;
   geminiKey?: string;
@@ -880,6 +881,7 @@ export async function exportPageToPsd(input: {
       filename: input.filename,
       width: input.width,
       height: input.height,
+      displayWidth: input.displayWidth,
       comicName: input.comicName,
       issueName: input.issueName,
     }),

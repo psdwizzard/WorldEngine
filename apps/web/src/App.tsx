@@ -4795,12 +4795,17 @@ function PanelsTab({
       const width = Math.round(hasNormalizedSize ? 1988 : page.width || 1988);
       const height = Math.round(hasNormalizedSize ? 3075 : page.height || 3075);
 
+      // Get the actual display width of the UI canvas for proper scaling
+      const displayCanvas = canvasRef.current;
+      const displayWidth = displayCanvas?.clientWidth ?? width;
+
       const result = await exportPageToPsd({
         pageId: page.id,
         outputFolder: settings.assetRoot.trim(),
         filename: page.label || "page",
         width,
         height,
+        displayWidth, // Pass UI display width for consistent font/stroke scaling
         comicName: settings.projectSlug,
         issueName: page.issueLabel,
         geminiKey: settings.geminiKey,
