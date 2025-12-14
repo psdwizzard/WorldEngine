@@ -1,0 +1,34 @@
+{
+  "manifestVersion": 5,
+  "id": "com.worldengine.photoshop",
+  "name": "WorldEngine",
+  "version": "0.1.0",
+  "main": "plugin.js",
+  "host": [
+    {
+      "app": "PS",
+      "minVersion": "23.0.0"
+    }
+  ],
+  "entrypoints": [
+    {
+      "type": "panel",
+      "id": "worldengine.panel",
+      "label": "WorldEngine",
+      "minimumSize": {
+        "width": 320,
+        "height": 520
+      },
+      "preferredDockedSize": {
+        "width": 360,
+        "height": 720
+      }
+    }
+  ],
+  "requiredPermissions": {
+    "network": {
+      "domains": ["localhost", "127.0.0.1"]
+    },
+    "localFileSystem": "fullAccess"
+  }
+}

@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WorldEngine</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header class="header">
+        <div class="title">WorldEngine</div>
+        <div class="subtitle">Photoshop panel</div>
+      </header>
+
+      <section class="card">
+        <div class="section-title">Status</div>
+        <div id="bootMessage" class="helper">Loading plugin…</div>
+        <pre id="bootError" class="boot-error" style="display:none;"></pre>
+      </section>
+
+      <section class="card">
+        <div class="row">
+          <label class="label" for="apiBaseUrl">API Base URL</label>
+          <input id="apiBaseUrl" class="input" type="text" value="http://localhost:4000" />
+        </div>
+        <div class="row">
+          <label class="label" for="projectSlug">Project</label>
+          <select id="projectSlug" class="select"></select>
+        </div>
+        <div class="row">
+          <label class="label" for="geminiKey">Gemini Key (optional)</label>
+          <input id="geminiKey" class="input" type="password" placeholder="x-gemini-key" />
+        </div>
+        <div class="row row-actions">
+          <button id="connectBtn" class="button">Connect</button>
+          <div id="status" class="status">Disconnected</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="tabs">
+          <button class="tab is-active" data-tab="characters">Characters</button>
+          <button class="tab" data-tab="locations">Locations</button>
+          <button class="tab" data-tab="items">Items</button>
+          <button class="tab" data-tab="pages">Pages</button>
+        </div>
+        <div id="tabContent" class="tab-content">
+          <div class="helper">Connect to load data.</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">Render → New Layer</div>
+        <div class="row">
+          <label class="label" for="prompt">Prompt</label>
+          <textarea id="prompt" class="textarea" rows="4" placeholder="Describe the panel..."></textarea>
+        </div>
+        <div class="row">
+          <label class="label" for="model">Model</label>
+          <select id="model" class="select">
+            <option value="nano-banana">Nano Banana</option>
+            <option value="nano-banana-pro">Nano Banana Pro</option>
+          </select>
+        </div>
+        <div class="row">
+          <label class="label" for="referenceAssetId">Reference Asset ID (optional)</label>
+          <input id="referenceAssetId" class="input" type="text" placeholder="Paste asset UUID" />
+        </div>
+        <div class="row cols">
+          <div class="col">
+            <label class="label" for="outWidth">Width</label>
+            <input id="outWidth" class="input" type="number" value="1024" min="64" step="1" />
+          </div>
+          <div class="col">
+            <label class="label" for="outHeight">Height</label>
+            <input id="outHeight" class="input" type="number" value="1024" min="64" step="1" />
+          </div>
+        </div>
+        <div class="row row-actions">
+          <button id="renderBtn" class="button primary" disabled>Render</button>
+          <button id="createGroupBtn" class="button" disabled>Create WorldEngine Group</button>
+        </div>
+        <div class="row row-actions">
+          <button id="createPanelFromLayerBtn" class="button" disabled>Create Panel from Active Layer</button>
+          <button id="syncPanelFromLayerBtn" class="button" disabled>Sync Active Layer → Panel</button>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <div class="hint">Tip: click an asset in the browser tabs to fill Reference Asset ID.</div>
+      </footer>
+    </div>
+
+    <script src="main.js"></script>
+  </body>
+</html>
