@@ -29,52 +29,43 @@
     locations: [],
     items: [],
     pages: [],
-    selectedRefs: [], // array of asset IDs for multi-reference
+    selectedRefs: [],
   };
 
   const el = {};
 
-  // Persisted local settings (stored in UXP plugin data folder, NOT your repo)
-  const SETTINGS_FILENAME = 'worldengine-settings.json';
-
-  async function getSettingsFile() {
-    const folder = await uxp.storage.localFileSystem.getDataFolder();
-    try {
-      return await folder.getEntry(SETTINGS_FILENAME);
-    } catch {
-      return await folder.createFile(SETTINGS_FILENAME, { overwrite: false });
-    }
-  }
+  /* ─────────────── Settings persistence ─────────────── */
+  const SETTINGS_FILE = 'worldengine-settings.json';
 
   async function loadSettings() {
     try {
-      const file = await getSettingsFile();
-      const text = await file.read({ format: uxp.storage.formats.utf8 });
-      if (!text) return;
-      const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === 'object') {
-        if (typeof parsed.apiBaseUrl === 'string') state.apiBaseUrl = parsed.apiBaseUrl;
-        if (typeof parsed.geminiKey === 'string') state.geminiKey = parsed.geminiKey;
-        if (typeof parsed.projectSlug === 'string') state.projectSlug = parsed.projectSlug;
+      const folder = await uxp.storage.localFileSystem.getDataFolder();
+      const file = await folder.getEntry(SETTINGS_FILE);
+      if (file) {
+        const text = await file.read({ format: uxp.storage.formats.utf8 });
+        const data = JSON.parse(text);
+        if (data.apiBaseUrl) state.apiBaseUrl = data.apiBaseUrl;
+        if (data.geminiKey) state.geminiKey = data.geminiKey;
+        if (data.projectSlug) state.projectSlug = data.projectSlug;
+        if (el.apiBaseUrl) el.apiBaseUrl.value = state.apiBaseUrl;
+        if (el.geminiKey) el.geminiKey.value = state.geminiKey;
       }
-    } catch (err) {
-      // Best-effort; avoid blocking UI if settings read fails.
-      console.warn('WorldEngine: failed to load settings', err);
+    } catch {
+      // ignore
     }
   }
 
   async function saveSettings() {
     try {
-      const file = await getSettingsFile();
-      const payload = {
+      const folder = await uxp.storage.localFileSystem.getDataFolder();
+      const file = await folder.createFile(SETTINGS_FILE, { overwrite: true });
+      await file.write(JSON.stringify({
         apiBaseUrl: state.apiBaseUrl,
         geminiKey: state.geminiKey,
         projectSlug: state.projectSlug,
-        savedAt: new Date().toISOString(),
-      };
-      await file.write(JSON.stringify(payload, null, 2), { format: uxp.storage.formats.utf8 });
-    } catch (err) {
-      console.warn('WorldEngine: failed to save settings', err);
+      }), { format: uxp.storage.formats.utf8 });
+    } catch {
+      // ignore
     }
   }
 
@@ -97,7 +88,6 @@
 
   function headers(extra) {
     const h = Object.assign({ Accept: 'application/json' }, extra || {});
-    // Always read Gemini key fresh from input (in case user entered it after connecting)
     const key = getVal(el.geminiKey, '') || state.geminiKey;
     if (key) h['x-gemini-key'] = key;
     if (state.projectSlug) h['x-project-slug'] = state.projectSlug;
@@ -205,19 +195,16 @@
       const item = document.createElement('div');
       item.className = 'we-entity';
 
-      // Collapsible header
       const hdr = document.createElement('button');
       hdr.type = 'button';
       hdr.className = 'we-entity-hdr';
       hdr.textContent = '▶ ' + (rec.name || rec.label || rec.id?.slice(0, 8) || '?');
 
-      // Thumbnail grid (hidden by default, no space when collapsed)
       const grid = document.createElement('div');
       grid.className = 'we-entity-grid';
       grid.style.display = 'none';
       grid.style.padding = '0';
 
-      // Gather asset ids (deduplicated by ID)
       const seen = new Set();
       const ids = [];
       function addId(label, id) {
@@ -234,7 +221,6 @@
 
       for (const [lbl, id] of ids) grid.appendChild(assetThumb(id, lbl));
 
-      // Toggle expand/collapse
       hdr.addEventListener('click', () => {
         const open = grid.style.display !== 'none';
         grid.style.display = open ? 'none' : 'flex';
@@ -290,8 +276,6 @@
     setStatus('OK (' + state.projectSlug + ')');
     renderTabs();
     openSection('project');
-
-    // Persist settings after successful connect.
     await saveSettings();
   }
 
@@ -365,7 +349,6 @@
     if (!panel?.id) throw new Error('Create failed');
     state.lastPanelId = panel.id;
 
-    // Send refs exactly like the web app: referenceAssetId (primary) + referenceAssetIds (all)
     const refIds = state.selectedRefs.length > 0 ? state.selectedRefs : undefined;
     const primaryRefId = refIds ? refIds[0] : undefined;
     const render = await fetchJson('/panels/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ panelId: panel.id, prompt, referenceAssetId: primaryRefId, referenceAssetIds: refIds, model, outputDimensions: { width: w, height: h } }) });
@@ -381,7 +364,89 @@
     await core.executeAsModal(async () => {
       const doc = app.activeDocument;
       if (!doc) throw new Error('No document');
-      await action.batchPlay([{ _obj: 'placeEvent', null: { _path: token, _kind: 'local' }, _options: { dialogOptions: 'dontDisplay' } }], { synchronousExecution: true, modalBehavior: 'execute' });
+
+      const TEMP_CHANNEL = '_WE_Mask';
+
+      // Step 1: Check if there's a selection by trying to duplicate it to a channel
+      let hasSelection = false;
+      try {
+        await action.batchPlay([
+          {
+            _obj: 'duplicate',
+            _target: [{ _ref: 'channel', _property: 'selection' }],
+            name: TEMP_CHANNEL,
+            _options: { dialogOptions: 'dontDisplay' },
+          },
+        ], { synchronousExecution: true, modalBehavior: 'execute' });
+        hasSelection = true;
+        console.log('WE: Selection saved to temp channel');
+      } catch (e) {
+        console.log('WE: No selection to save', e.message);
+        hasSelection = false;
+      }
+
+      // Step 2: Place the rendered image
+      console.log('WE: Placing image...');
+      await action.batchPlay([
+        { _obj: 'placeEvent', null: { _path: token, _kind: 'local' }, _options: { dialogOptions: 'dontDisplay' } },
+      ], { synchronousExecution: true, modalBehavior: 'execute' });
+      console.log('WE: Image placed');
+
+      if (hasSelection) {
+        try {
+          // Step 3: Load selection from the saved channel
+          console.log('WE: Loading selection from temp channel...');
+          await action.batchPlay([
+            {
+              _obj: 'set',
+              _target: [{ _ref: 'channel', _property: 'selection' }],
+              to: { _ref: 'channel', _name: TEMP_CHANNEL },
+              _options: { dialogOptions: 'dontDisplay' },
+            },
+          ], { synchronousExecution: true, modalBehavior: 'execute' });
+          console.log('WE: Selection loaded');
+
+          // Step 4: Add layer mask from selection
+          console.log('WE: Creating layer mask...');
+          await action.batchPlay([
+            {
+              _obj: 'make',
+              new: { _class: 'channel' },
+              at: { _ref: 'channel', _enum: 'channel', _value: 'mask' },
+              using: { _enum: 'userMaskEnabled', _value: 'revealSelection' },
+              _options: { dialogOptions: 'dontDisplay' },
+            },
+          ], { synchronousExecution: true, modalBehavior: 'execute' });
+          console.log('WE: Layer mask created');
+
+          // Step 5: Deselect
+          await action.batchPlay([
+            {
+              _obj: 'set',
+              _target: [{ _ref: 'channel', _property: 'selection' }],
+              to: { _enum: 'ordinal', _value: 'none' },
+              _options: { dialogOptions: 'dontDisplay' },
+            },
+          ], { synchronousExecution: true, modalBehavior: 'execute' });
+          console.log('WE: Deselected');
+        } catch (e) {
+          console.error('WE: Mask creation failed', e);
+        }
+
+        // Step 6: Delete temp channel
+        try {
+          await action.batchPlay([
+            {
+              _obj: 'delete',
+              _target: [{ _ref: 'channel', _name: TEMP_CHANNEL }],
+              _options: { dialogOptions: 'dontDisplay' },
+            },
+          ], { synchronousExecution: true, modalBehavior: 'execute' });
+          console.log('WE: Temp channel deleted');
+        } catch (e) {
+          console.log('WE: Could not delete temp channel', e.message);
+        }
+      }
     }, { commandName: 'WE Render' });
 
     setStatus('Done ' + asset.id.slice(0, 6));
@@ -406,12 +471,10 @@
     el.createPanelFromLayerBtn = document.getElementById('createPanelFromLayerBtn');
     el.syncPanelFromLayerBtn = document.getElementById('syncPanelFromLayerBtn');
 
-    // Accordion buttons
     document.querySelectorAll('.we-section-btn').forEach(btn => {
       btn.addEventListener('click', () => openSection(btn.dataset.section));
     });
 
-    // Tabs
     document.querySelectorAll('.we-tab').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.we-tab').forEach(t => t.classList.remove('is-active'));
@@ -428,16 +491,6 @@
     el.projectSlug?.addEventListener('change', () => {
       state.projectSlug = getVal(el.projectSlug, '');
       if (state.connected) el.connectBtn.click();
-    });
-
-    // Save as user edits fields (best-effort)
-    el.apiBaseUrl?.addEventListener('change', async () => {
-      state.apiBaseUrl = getVal(el.apiBaseUrl, state.apiBaseUrl);
-      await saveSettings();
-    });
-    el.geminiKey?.addEventListener('change', async () => {
-      state.geminiKey = getVal(el.geminiKey, state.geminiKey);
-      await saveSettings();
     });
 
     el.clearRefsBtn?.addEventListener('click', () => {
@@ -463,12 +516,13 @@
     });
   }
 
-  setTimeout(async () => {
+  async function start() {
     bind();
-    await loadSettings();
-    // Apply loaded settings into the UI inputs (if present)
-    if (el.apiBaseUrl && state.apiBaseUrl) el.apiBaseUrl.value = state.apiBaseUrl;
-    if (el.geminiKey && state.geminiKey) el.geminiKey.value = state.geminiKey;
     setStatus('Ready');
-  }, 0);
+    await loadSettings();
+    if (el.apiBaseUrl) el.apiBaseUrl.value = state.apiBaseUrl;
+    if (el.geminiKey) el.geminiKey.value = state.geminiKey;
+  }
+
+  setTimeout(start, 0);
 })();
