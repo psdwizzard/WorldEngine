@@ -367,34 +367,61 @@
 
       const TEMP_CHANNEL = '_WE_Mask';
 
-      // Step 1: Check if there's a selection by trying to duplicate it to a channel
+      // Step 1: Check if there's an active selection by querying the document
       let hasSelection = false;
       try {
-        await action.batchPlay([
+        const result = await action.batchPlay([
           {
-            _obj: 'duplicate',
-            _target: [{ _ref: 'channel', _property: 'selection' }],
-            name: TEMP_CHANNEL,
+            _obj: 'get',
+            _target: [
+              { _property: 'selection' },
+              { _ref: 'document', _enum: 'ordinal', _value: 'targetEnum' }
+            ],
             _options: { dialogOptions: 'dontDisplay' },
           },
         ], { synchronousExecution: true, modalBehavior: 'execute' });
-        hasSelection = true;
-        console.log('WE: Selection saved to temp channel');
+        // If there's a selection, result[0].selection will have bounds
+        const sel = result?.[0]?.selection;
+        if (sel && sel.top !== undefined && sel.left !== undefined) {
+          hasSelection = true;
+          console.log('WE: Selection detected');
+        } else {
+          console.log('WE: No selection active');
+        }
       } catch (e) {
-        console.log('WE: No selection to save', e.message);
+        console.log('WE: No selection (query failed)');
         hasSelection = false;
       }
 
-      // Step 2: Place the rendered image
+      // Step 2: If we have a selection, save it to a temp channel before placing
+      if (hasSelection) {
+        try {
+          await action.batchPlay([
+            {
+              _obj: 'duplicate',
+              _target: [{ _ref: 'channel', _property: 'selection' }],
+              name: TEMP_CHANNEL,
+              _options: { dialogOptions: 'dontDisplay' },
+            },
+          ], { synchronousExecution: true, modalBehavior: 'execute' });
+          console.log('WE: Selection saved to temp channel');
+        } catch (e) {
+          console.log('WE: Could not save selection', e.message);
+          hasSelection = false;
+        }
+      }
+
+      // Step 3: Place the rendered image
       console.log('WE: Placing image...');
       await action.batchPlay([
         { _obj: 'placeEvent', null: { _path: token, _kind: 'local' }, _options: { dialogOptions: 'dontDisplay' } },
       ], { synchronousExecution: true, modalBehavior: 'execute' });
       console.log('WE: Image placed');
 
+      // Step 4: If we saved a selection, restore it and create mask
       if (hasSelection) {
         try {
-          // Step 3: Load selection from the saved channel
+          // Load selection from the saved channel
           console.log('WE: Loading selection from temp channel...');
           await action.batchPlay([
             {
@@ -406,7 +433,7 @@
           ], { synchronousExecution: true, modalBehavior: 'execute' });
           console.log('WE: Selection loaded');
 
-          // Step 4: Add layer mask from selection
+          // Add layer mask from selection
           console.log('WE: Creating layer mask...');
           await action.batchPlay([
             {
@@ -419,7 +446,7 @@
           ], { synchronousExecution: true, modalBehavior: 'execute' });
           console.log('WE: Layer mask created');
 
-          // Step 5: Deselect
+          // Deselect
           await action.batchPlay([
             {
               _obj: 'set',
@@ -433,7 +460,7 @@
           console.error('WE: Mask creation failed', e);
         }
 
-        // Step 6: Delete temp channel
+        // Delete temp channel
         try {
           await action.batchPlay([
             {

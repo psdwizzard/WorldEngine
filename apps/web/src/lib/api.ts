@@ -19,7 +19,8 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000
 
 function resolveUrl(path: string) {
   if (path.startsWith("http")) return path;
-  return `${API_BASE_URL.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
+  const resolved = `${API_BASE_URL.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
+  return resolved;
 }
 
 function authHeader(options?: { geminiKey?: string; projectId?: string; projectSlug?: string }): HeadersInit {
@@ -757,7 +758,7 @@ export async function editPanelImage(input: {
 export async function fetchProjects(): Promise<ProjectSummary[]> {
   const response = await fetch(resolveUrl("/projects"));
   if (!response.ok) {
-  const message = await response.text();
+    const message = await response.text();
     throw new Error(message || "Failed to load projects");
   }
 

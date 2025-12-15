@@ -1,4 +1,4 @@
-﻿import path from "node:path";
+import path from "node:path";
 import type { EnvConfig } from "../lib/env";
 import { prepareDataRoot } from "../lib/dataRoot";
 import { configureAssetStore } from "../services/assetStore";
@@ -9,7 +9,7 @@ import { DEFAULT_PROJECT_SLUG } from "../lib/constants";
 
 export async function initializePersistence(env: EnvConfig) {
   const dataRoot = path.resolve(env.DATA_ROOT);
-  await prepareDataRoot(dataRoot);
+  await prepareDataRoot(dataRoot, { nodeEnv: env.NODE_ENV });
   await initializeProjectStore(dataRoot);
   const projects = listProjects();
   if (projects.length === 0) {

@@ -1,4 +1,4 @@
-﻿export type UUID = string;
+export type UUID = string;
 
 export const PANEL_RENDER_MODEL_VALUES = ["nano-banana", "nano-banana-pro"] as const;
 export type PanelRenderModel = (typeof PANEL_RENDER_MODEL_VALUES)[number];
@@ -212,7 +212,8 @@ export interface StoryboardPage {
 
 export interface GeminiGenerationRequest {
   prompt: string;
-  model?: PanelRenderModel;
+  /** Gemini model ID (ex: "gemini-2.5-flash-image"). */
+  model?: string;
   imageInput?: {
     mimeType: string;
     data: string;

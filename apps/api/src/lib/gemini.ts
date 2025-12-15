@@ -28,7 +28,21 @@ export async function generateImage(
   request: GeminiGenerationRequest,
   options?: { apiKeyOverride?: string }
 ): Promise<{ imageBuffer: Buffer; aiDescription?: string }> {
-  const client = getGeminiClient(env, options?.apiKeyOverride);
+  const apiKeyOverride = options?.apiKeyOverride?.trim();
+  // In tests we don't require a real Gemini key; return a deterministic placeholder.
+  if (!apiKeyOverride && !env.GEMINI_API_KEY) {
+    if (env.NODE_ENV === "test") {
+      const width = request.outputDimensions?.width ?? 512;
+      const height = request.outputDimensions?.height ?? 512;
+      const placeholder = await generateVariedPlaceholder(request.prompt, width, height);
+      return { imageBuffer: placeholder, aiDescription: undefined };
+    }
+    throw new Error(
+      "Missing GEMINI_API_KEY; set it in .env.local or pass x-gemini-key before generating renders.",
+    );
+  }
+
+  const client = getGeminiClient(env, apiKeyOverride);
   const modelName = request.model ?? DEFAULT_IMAGE_MODEL;
   const model = client.getGenerativeModel({ model: modelName });
   const width = request.outputDimensions?.width ?? 512;

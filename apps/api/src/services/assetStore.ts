@@ -214,6 +214,3 @@ export function listAssets() {
   return Array.from(registry.values());
 }
 
-
-
-

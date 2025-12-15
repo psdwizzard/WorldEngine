@@ -272,7 +272,7 @@ export function generateBubbleEllipseSvg(input: BubbleEllipseInput & { width: nu
  * Matches PNG export geometry (viewbox-based with padding and tail lift).
  */
 export function generateSpeechBubbleSvg(input: BubbleTailInput & { width: number; height: number }): string {
-  const { cx, cy, rx, ry, tailAngle, tailLength, fill = "#ffffff", stroke = "#000000", strokeWidth = DEFAULT_STROKE_WIDTH, width, height } = input;
+  const { tailAngle, tailLength, fill = "#ffffff", stroke = "#000000", strokeWidth = DEFAULT_STROKE_WIDTH, width, height } = input;
   // Match PNG viewbox-based geometry
   const angleRad = (tailAngle * Math.PI) / 180;
   const spreadRad = (TAIL_SPREAD_DEG * Math.PI) / 180;

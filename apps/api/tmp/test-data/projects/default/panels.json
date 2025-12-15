@@ -1,0 +1,79 @@
+{
+  "pages": [
+    {
+      "id": "31b9f5c2-3b05-4b15-8021-c398e11052d5",
+      "label": "Updated Page",
+      "width": 1988,
+      "height": 3075,
+      "panels": [
+        {
+          "id": "7819709d-6b61-4acc-80c1-881c7bbc4836",
+          "pageId": "31b9f5c2-3b05-4b15-8021-c398e11052d5",
+          "label": "Panel 1",
+          "renderScale": 1,
+          "renderOffsetX": 0,
+          "renderOffsetY": 0,
+          "rotation": 0,
+          "shadowBlur": 0,
+          "shadowColor": "rgba(0,0,0,0.35)",
+          "prompt": "",
+          "order": 0,
+          "geometry": {
+            "x": 0.2,
+            "y": 0.15,
+            "width": 0.4,
+            "height": 0.4
+          },
+          "createdAt": "2025-12-13T19:06:17.976Z",
+          "updatedAt": "2025-12-13T19:06:18.008Z"
+        },
+        {
+          "id": "e1435de0-ea14-4485-9b7a-038fe6bdc5de",
+          "pageId": "31b9f5c2-3b05-4b15-8021-c398e11052d5",
+          "label": "Panel 2",
+          "renderScale": 1,
+          "renderOffsetX": 0,
+          "renderOffsetY": 0,
+          "rotation": 0,
+          "shadowBlur": 0,
+          "shadowColor": "rgba(0,0,0,0.35)",
+          "prompt": "",
+          "order": 1,
+          "geometry": {
+            "x": 0.55,
+            "y": 0.05,
+            "width": 0.4,
+            "height": 0.4
+          },
+          "createdAt": "2025-12-13T19:06:17.976Z",
+          "updatedAt": "2025-12-13T19:06:18.008Z"
+        },
+        {
+          "id": "595bf589-e4c1-4135-be48-8e684783b60f",
+          "pageId": "31b9f5c2-3b05-4b15-8021-c398e11052d5",
+          "label": "Panel 3",
+          "renderScale": 1,
+          "renderOffsetX": 0,
+          "renderOffsetY": 0,
+          "rotation": 0,
+          "shadowBlur": 0,
+          "shadowColor": "rgba(0,0,0,0.35)",
+          "prompt": "",
+          "order": 2,
+          "geometry": {
+            "x": 0.05,
+            "y": 0.5,
+            "width": 0.9,
+            "height": 0.4
+          },
+          "createdAt": "2025-12-13T19:06:17.976Z",
+          "updatedAt": "2025-12-13T19:06:18.008Z"
+        }
+      ],
+      "createdAt": "2025-12-13T19:06:17.976Z",
+      "updatedAt": "2025-12-13T19:06:18.008Z"
+    }
+  ],
+  "activePageId": "31b9f5c2-3b05-4b15-8021-c398e11052d5",
+  "updatedAt": "2025-12-13T19:06:18.008Z"
+}

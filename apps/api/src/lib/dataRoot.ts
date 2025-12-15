@@ -15,8 +15,11 @@ async function pathExists(target: string) {
  * Ensure the workspace data root exists and, if necessary, migrate
  * from the legacy apps/api/output directory.
  */
-export async function prepareDataRoot(targetRoot: string) {
+export async function prepareDataRoot(targetRoot: string, options?: { nodeEnv?: string }) {
   await mkdir(targetRoot, { recursive: true });
+  if (options?.nodeEnv === "test") {
+    return;
+  }
   const normalizedTarget = path.resolve(targetRoot);
   const normalizedLegacy = path.resolve(LEGACY_DATA_ROOT);
 

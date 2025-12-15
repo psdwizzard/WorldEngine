@@ -1,4 +1,4 @@
-﻿import { createServer } from "./server";
+import { createServer } from "./server";
 import { loadEnv } from "./lib/env";
 import { initializePersistence } from "./storage/persistence";
 

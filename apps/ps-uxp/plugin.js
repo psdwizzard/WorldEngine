@@ -50,32 +50,36 @@ const panelHTML = `
     <!-- 3. Generate -->
     <div class="we-section" data-section="generate">
       <button class="we-section-btn" data-section="generate">🎨 Generate</button>
-      <div class="we-section-body" data-section="generate">
-        <label class="we-label">Prompt</label>
-        <textarea id="prompt" class="we-textarea" rows="2" placeholder="Describe..."></textarea>
-        <div class="we-row">
-          <div class="we-col">
-            <label class="we-label">Model</label>
-            <select id="model" class="we-select">
-              <option value="nano-banana">Nano</option>
-              <option value="nano-banana-pro">Pro</option>
-            </select>
-          </div>
-          <div class="we-col">
-            <label class="we-label">W×H</label>
-            <div class="we-row-inner">
-              <input id="outWidth" class="we-input-sm" type="number" value="1024" />
-              <span>×</span>
-              <input id="outHeight" class="we-input-sm" type="number" value="1024" />
+      <div class="we-section-body we-generate-body" data-section="generate">
+        <div class="we-generate-top">
+          <label class="we-label">Prompt</label>
+          <textarea id="prompt" class="we-textarea we-prompt-area" placeholder="Describe..."></textarea>
+        </div>
+        <div class="we-generate-bottom">
+          <div class="we-row">
+            <div class="we-col">
+              <label class="we-label">Model</label>
+              <select id="model" class="we-select">
+                <option value="nano-banana">Nano</option>
+                <option value="nano-banana-pro">Pro</option>
+              </select>
+            </div>
+            <div class="we-col">
+              <label class="we-label">W×H</label>
+              <div class="we-row-inner">
+                <input id="outWidth" class="we-input-sm" type="number" value="1024" />
+                <span>×</span>
+                <input id="outHeight" class="we-input-sm" type="number" value="1024" />
+              </div>
             </div>
           </div>
+          <div class="we-row-inner">
+            <label class="we-label">Refs</label>
+            <button id="clearRefsBtn" class="we-btn-mini">Clear</button>
+          </div>
+          <div id="selectedRefs" class="we-refs"></div>
+          <button id="renderBtn" class="we-btn we-btn-primary" disabled>Render → Layer</button>
         </div>
-        <div class="we-row-inner">
-          <label class="we-label">Refs</label>
-          <button id="clearRefsBtn" class="we-btn-mini">Clear</button>
-        </div>
-        <div id="selectedRefs" class="we-refs"></div>
-        <button id="renderBtn" class="we-btn we-btn-primary" disabled>Render → Layer</button>
       </div>
     </div>
 
@@ -473,6 +477,29 @@ const panelCSS = `
 
 .we-btn-mini:hover {
   background: #444;
+}
+
+/* Generate section layout - prompt expands, button at bottom */
+.we-generate-body.is-open {
+  display: flex !important;
+  flex-direction: column;
+}
+
+.we-generate-top {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 60px;
+}
+
+.we-prompt-area {
+  flex: 1 1 auto;
+  min-height: 50px;
+  resize: none;
+}
+
+.we-generate-bottom {
+  flex: 0 0 auto;
 }
 `;
 

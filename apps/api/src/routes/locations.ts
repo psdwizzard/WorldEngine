@@ -214,15 +214,12 @@ locationsRouter.post("/generate-from-image", async (req, res) => {
     const imageBuffer = result.imageBuffer;
     const aiDescription = result.aiDescription;
 
-    let targetLocationId: UUID;
-    let locationForResponseId: UUID;
     let spot: LocationSpot | null = null;
 
     if (createAsNew) {
       // Create a new location
       const locationName = newLocationName?.trim() || `${sourceName} - Variation`;
       const targetLocation = ensureLocation(projectSlug, undefined, locationName);
-      targetLocationId = targetLocation.id;
 
       const asset = await saveAssetBuffer(imageBuffer, {
         scope: ["locations", targetLocation.id, "primary"],
@@ -270,9 +267,7 @@ locationsRouter.post("/generate-from-image", async (req, res) => {
     sourceLocation.updatedAt = new Date().toISOString();
     await upsertLocation(sourceLocation);
 
-    locationForResponseId = sourceLocation.id;
-
-    const updatedLocation = getLocation(locationForResponseId, projectSlug);
+    const updatedLocation = getLocation(sourceLocation.id, projectSlug);
 
     res.json({
       status: "generated",

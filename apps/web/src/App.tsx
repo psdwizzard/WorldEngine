@@ -40,7 +40,6 @@ import {
   listItemsForProject,
   deleteCharacter,
   renameCharacter,
-  generateLocationView,
   generateLocationFromImage,
   renderPanelImage,
   editPanelImage,
@@ -302,7 +301,7 @@ export function App() {
   const [showNewIssueModal, setShowNewIssueModal] = useState(false);
   const [newIssueName, setNewIssueName] = useState("");
   const [storyboardIssues, setStoryboardIssues] = useState<string[]>([]);
-  const customIssues = settings.customIssues ?? [];
+  const customIssues = useMemo(() => settings.customIssues ?? [], [settings.customIssues]);
   const selectedIssue = settings.selectedIssue ?? "";
 
   const refreshProjects = useCallback(async () => {
@@ -973,9 +972,6 @@ function CharactersTab({
   const [locationName, setLocationName] = useState("Untitled Location");
   const [spotLabel, setSpotLabel] = useState("");
   const [uploadState, setUploadState] = useState<UploadState>({ status: "idle" });
-  const [viewLabel, setViewLabel] = useState("");
-  const [viewPrompt, setViewPrompt] = useState("");
-  const [generateState, setGenerateState] = useState<UploadState>({ status: "idle" });
   const [genLocationName, setGenLocationName] = useState("");
   const [genLocationPrompt, setGenLocationPrompt] = useState("");
   const [createAsNewLocation, setCreateAsNewLocation] = useState(false);
@@ -1014,39 +1010,6 @@ function CharactersTab({
       setUploadState({ status: "error", message });
     } finally {
       event.target.value = "";
-    }
-  };
-
-  const handleGenerateView = async () => {
-    const trimmedLabel = viewLabel.trim();
-    const trimmedPrompt = viewPrompt.trim();
-    if (!trimmedLabel || !trimmedPrompt) {
-      setGenerateState({ status: "error", message: "Add a view label and prompt" });
-      return;
-    }
-
-    setGenerateState({ status: "uploading", message: `Generating "${trimmedLabel}"` });
-
-    try {
-      const response = await generateLocationView({
-        locationId: location?.id,
-        name: locationName,
-        label: trimmedLabel,
-        prompt: trimmedPrompt,
-        geminiKey: settings.geminiKey,
-        projectSlug: settings.projectSlug,
-      });
-
-      setLocation(response.location);
-      setGenerateState({
-        status: "success",
-        message: "View generated",
-        assetId: response.assetId ?? undefined,
-      });
-      setViewPrompt("");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to generate view";
-      setGenerateState({ status: "error", message });
     }
   };
 
@@ -2865,8 +2828,6 @@ function PanelsTab({
     
     // Position the new bubble offset from the parent
     // Calculate offset based on where there's space (try right, then down, then left, then up)
-    const offsetX = 0.15;
-    const offsetY = 0.08;
     let newX = parentBubble.geometry.x + parentBubble.geometry.width + 0.02;
     let newY = parentBubble.geometry.y;
     
@@ -2998,7 +2959,7 @@ function PanelsTab({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [updateGeometry, updateCaptionBox, updateBubble]);
+  }, [updateGeometry, updateCaptionBox, updateBubble, updatePanel]);
 
   useEffect(() => {
     if (!page || !selectedPanelId) return;
@@ -3859,7 +3820,7 @@ function PanelsTab({
       setError(cause instanceof Error ? cause.message : "Failed to create panel");
       setStatus("error");
     }
-  }, [markLayoutLoaded, page, settings.geminiKey, settings.projectSlug]);
+  }, [page, settings.geminiKey, settings.projectSlug]);
 
   const handleCreatePage = useCallback(async () => {
     setStatus("saving");
@@ -3969,7 +3930,7 @@ function PanelsTab({
     setError(null);
 
     try {
-      const result = await deletePanel(panelId, {
+      await deletePanel(panelId, {
         geminiKey: settings.geminiKey,
         projectSlug: settings.projectSlug,
       });
@@ -4083,9 +4044,7 @@ function PanelsTab({
 
       const displayCanvas = canvasRef.current;
       const displayWidth = displayCanvas?.clientWidth ?? width;
-      const displayHeight = displayCanvas?.clientHeight ?? height;
       const exportScaleX = displayWidth > 0 ? width / displayWidth : 1;
-      const exportScaleY = displayHeight > 0 ? height / displayHeight : 1;
 
       const panelsWithImage = page.panels.filter((panel) => panel.renderAssetId);
 
@@ -4094,7 +4053,6 @@ function PanelsTab({
         img.crossOrigin = "anonymous";
         img.src = assetHref(panel.renderAssetId!);
 
-        // eslint-disable-next-line no-await-in-loop
         await new Promise<void>((resolve, reject) => {
           img.onload = () => resolve();
           img.onerror = () => reject(new Error("Failed to load panel image"));
@@ -4749,7 +4707,7 @@ function PanelsTab({
           setStatus("saved");
           // Briefly show success, then reset
           setTimeout(() => setStatus("ready"), 2000);
-          console.log(`Exported to: ${result.path}`);
+          console.warn(`Exported to: ${result.path}`);
         } catch (exportError) {
           setError(exportError instanceof Error ? exportError.message : "Failed to export page");
           setStatus("error");
@@ -4814,7 +4772,7 @@ function PanelsTab({
 
       setStatus("saved");
       setTimeout(() => setStatus("ready"), 2000);
-      console.log(`Exported PSD to: ${result.path} (${result.layerCount} layers)`);
+      console.warn(`Exported PSD to: ${result.path} (${result.layerCount} layers)`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to export PSD");
       setStatus("error");
@@ -5487,7 +5445,6 @@ function PanelsTab({
               status !== "loading" &&
               page.panels.map((panel) => {
                 const style = renderPanelStyle(panel);
-                const offsets = panel.geometry.cornerOffsets;
 
                 return (
                 <div
@@ -5780,11 +5737,6 @@ function PanelsTab({
                 const childCy = (child.geometry.y + child.geometry.height / 2) * 100;
                 const parentCx = (parent.geometry.x + parent.geometry.width / 2) * 100;
                 const parentCy = (parent.geometry.y + parent.geometry.height / 2) * 100;
-
-                const childRx = (child.geometry.width / 2) * 100;
-                const childRy = (child.geometry.height / 2) * 100;
-                const parentRx = (parent.geometry.width / 2) * 100;
-                const parentRy = (parent.geometry.height / 2) * 100;
 
                 const dx = parentCx - childCx;
                 const dy = parentCy - childCy;

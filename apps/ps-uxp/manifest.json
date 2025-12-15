@@ -2,8 +2,17 @@
   "manifestVersion": 5,
   "id": "com.worldengine.photoshop",
   "name": "WorldEngine",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "main": "plugin.js",
+  "icons": [
+    {
+      "width": 23,
+      "height": 23,
+      "path": "icons/pluginIcon.png",
+      "scale": [1, 2],
+      "theme": ["darkest", "dark", "light", "lightest", "all"]
+    }
+  ],
   "host": [
     {
       "app": "PS",
@@ -22,7 +31,16 @@
       "preferredDockedSize": {
         "width": 360,
         "height": 720
-      }
+      },
+    "icons": [
+        {
+          "width": 23,
+          "height": 23,
+          "path": "icons/panel.png",
+          "scale": [1, 2],
+          "theme": ["darkest", "dark", "light", "lightest", "all"]
+        }
+      ]
     }
   ],
   "requiredPermissions": {

@@ -1,4 +1,4 @@
-﻿import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
 import type { PanelPrompt, PanelRenderModel, StoryboardPage, StoryboardPanel, UUID } from "@worldengine/shared";
@@ -21,7 +21,6 @@ import { loadEnv } from "../lib/env";
 import type { EnvConfig } from "../lib/env";
 import { 
   buildConnectorGeometry, 
-  computeBubbleFontSize,
   buildParentTipGeometry,
   generateSpeechBubbleSvg,
   DEFAULT_STROKE_WIDTH,
@@ -346,7 +345,6 @@ panelsRouter.delete("/:panelId", async (req, res) => {
   }
   
   const { page: currentPage } = found;
-  const panelIndex = currentPage.panels.findIndex(p => p.id === parsed.data.panelId);
 
   // Don't allow deleting the last panel
   if (currentPage.panels.length <= 1) {

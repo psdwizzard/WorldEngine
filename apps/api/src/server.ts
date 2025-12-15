@@ -28,7 +28,13 @@ export function createServer(env: EnvConfig) {
 
     asset.stream.on("error", (error) => {
       console.error("asset:stream_error", error);
-      res.status(500).end();
+      // Only try to send error response if headers haven't been sent yet
+      if (!res.headersSent) {
+        res.status(500).end();
+      } else {
+        // If headers already sent, destroy the connection
+        res.destroy();
+      }
     });
 
     asset.stream.pipe(res);
