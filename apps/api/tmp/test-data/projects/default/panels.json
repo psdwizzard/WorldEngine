@@ -1,14 +1,14 @@
 {
   "pages": [
     {
-      "id": "31b9f5c2-3b05-4b15-8021-c398e11052d5",
+      "id": "41b293c6-2b0c-4c77-9b43-59b93b5b9038",
       "label": "Updated Page",
       "width": 1988,
       "height": 3075,
       "panels": [
         {
-          "id": "7819709d-6b61-4acc-80c1-881c7bbc4836",
-          "pageId": "31b9f5c2-3b05-4b15-8021-c398e11052d5",
+          "id": "19e98ab8-2aa1-409b-b9c0-5e55aa794505",
+          "pageId": "41b293c6-2b0c-4c77-9b43-59b93b5b9038",
           "label": "Panel 1",
           "renderScale": 1,
           "renderOffsetX": 0,
@@ -24,12 +24,12 @@
             "width": 0.4,
             "height": 0.4
           },
-          "createdAt": "2025-12-13T19:06:17.976Z",
-          "updatedAt": "2025-12-13T19:06:18.008Z"
+          "createdAt": "2025-12-15T13:28:22.380Z",
+          "updatedAt": "2025-12-15T13:28:22.395Z"
         },
         {
-          "id": "e1435de0-ea14-4485-9b7a-038fe6bdc5de",
-          "pageId": "31b9f5c2-3b05-4b15-8021-c398e11052d5",
+          "id": "e88c0cf6-bd50-4c07-af1d-01770c41d26c",
+          "pageId": "41b293c6-2b0c-4c77-9b43-59b93b5b9038",
           "label": "Panel 2",
           "renderScale": 1,
           "renderOffsetX": 0,
@@ -45,12 +45,12 @@
             "width": 0.4,
             "height": 0.4
           },
-          "createdAt": "2025-12-13T19:06:17.976Z",
-          "updatedAt": "2025-12-13T19:06:18.008Z"
+          "createdAt": "2025-12-15T13:28:22.380Z",
+          "updatedAt": "2025-12-15T13:28:22.395Z"
         },
         {
-          "id": "595bf589-e4c1-4135-be48-8e684783b60f",
-          "pageId": "31b9f5c2-3b05-4b15-8021-c398e11052d5",
+          "id": "ae01ec64-ca8d-4b26-b5cf-6aea46ae6d73",
+          "pageId": "41b293c6-2b0c-4c77-9b43-59b93b5b9038",
           "label": "Panel 3",
           "renderScale": 1,
           "renderOffsetX": 0,
@@ -66,14 +66,14 @@
             "width": 0.9,
             "height": 0.4
           },
-          "createdAt": "2025-12-13T19:06:17.976Z",
-          "updatedAt": "2025-12-13T19:06:18.008Z"
+          "createdAt": "2025-12-15T13:28:22.380Z",
+          "updatedAt": "2025-12-15T13:28:22.395Z"
         }
       ],
-      "createdAt": "2025-12-13T19:06:17.976Z",
-      "updatedAt": "2025-12-13T19:06:18.008Z"
+      "createdAt": "2025-12-15T13:28:22.380Z",
+      "updatedAt": "2025-12-15T13:28:22.395Z"
     }
   ],
-  "activePageId": "31b9f5c2-3b05-4b15-8021-c398e11052d5",
-  "updatedAt": "2025-12-13T19:06:18.008Z"
+  "activePageId": "41b293c6-2b0c-4c77-9b43-59b93b5b9038",
+  "updatedAt": "2025-12-15T13:28:22.395Z"
 }

@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   color-scheme: light dark;
   font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background-color: #0f1115;
@@ -975,6 +975,34 @@ label.upload.is-disabled {
   margin: 0;
   font-size: 0.75rem;
   color: rgba(245, 246, 249, 0.55);
+}
+
+/* Backup & Restore Section */
+.backup-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+.backup-action {
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.backup-action h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.95rem;
+  color: #f5f6f9;
+}
+.backup-action .helper-text {
+  margin-bottom: 0.75rem;
+}
+.backup-action button {
+  width: 100%;
+}
+.backup-action .upload-status {
+  margin-top: 0.5rem;
 }
 
 .asset-link {

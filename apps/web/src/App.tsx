@@ -7125,6 +7125,170 @@ function PanelsTab({
   );
 }
 
+/**
+ * BackupRestoreSection - Component for backing up and restoring project data
+ */
+function BackupRestoreSection() {
+  const [backupStatus, setBackupStatus] = useState<UploadState>({ status: "idle" });
+  const [restoreStatus, setRestoreStatus] = useState<UploadState>({ status: "idle" });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Download a full backup of all project data
+   */
+  const handleBackup = async () => {
+    setBackupStatus({ status: "uploading", message: "Creating backup..." });
+    try {
+      const response = await fetch(`${apiBaseUrl}/backup/export`);
+      if (!response.ok) {
+        throw new Error(`Backup failed: ${response.statusText}`);
+      }
+      
+      // Get the filename from Content-Disposition header or generate one
+      const contentDisposition = response.headers.get("Content-Disposition");
+      let filename = "worldengine-backup.zip";
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (match) {
+          filename = match[1];
+        }
+      }
+
+      // Download the file
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setBackupStatus({ status: "success", message: `Backup downloaded: ${filename}` });
+    } catch (error) {
+      setBackupStatus({
+        status: "error",
+        message: error instanceof Error ? error.message : "Backup failed",
+      });
+    }
+  };
+
+  /**
+   * Trigger file input for restore
+   */
+  const handleRestoreClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  /**
+   * Handle restore from uploaded backup file
+   */
+  const handleRestoreFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Confirm before restore
+    const confirmed = window.confirm(
+      `Are you sure you want to restore from "${file.name}"?\n\n` +
+      "This will overwrite existing data. Make sure you have a backup of current data if needed.\n\n" +
+      "The server will need to be restarted after restore."
+    );
+
+    if (!confirmed) {
+      event.target.value = "";
+      return;
+    }
+
+    setRestoreStatus({ status: "uploading", message: "Restoring backup..." });
+    
+    try {
+      const formData = new FormData();
+      formData.append("backup", file);
+
+      const response = await fetch(`${apiBaseUrl}/backup/import`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || "Restore failed");
+      }
+
+      setRestoreStatus({ 
+        status: "success", 
+        message: result.message || "Backup restored! Please restart the server." 
+      });
+    } catch (error) {
+      setRestoreStatus({
+        status: "error",
+        message: error instanceof Error ? error.message : "Restore failed",
+      });
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  return (
+    <div className="form-card">
+      <h3>Backup &amp; Restore</h3>
+      <p className="helper-text">
+        Create a full backup of your projects, characters, locations, items, panels, and generated outputs.
+        Use this to transfer your work to another computer or to keep a safe copy.
+      </p>
+      
+      <div className="backup-actions">
+        <div className="backup-action">
+          <h4>Export Backup</h4>
+          <p className="helper-text">Download a ZIP file containing all your data.</p>
+          <button
+            type="button"
+            className="primary"
+            onClick={handleBackup}
+            disabled={backupStatus.status === "uploading"}
+          >
+            {backupStatus.status === "uploading" ? "Creating..." : "Download Backup"}
+          </button>
+          {backupStatus.message && (
+            <p className={`upload-status status-${backupStatus.status}`} aria-live="polite">
+              {backupStatus.message}
+            </p>
+          )}
+        </div>
+
+        <div className="backup-action">
+          <h4>Import Backup</h4>
+          <p className="helper-text">
+            Restore from a previously exported backup. <strong>Warning:</strong> This will overwrite existing data!
+          </p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".zip"
+            style={{ display: "none" }}
+            onChange={handleRestoreFile}
+          />
+          <button
+            type="button"
+            className="ghost"
+            onClick={handleRestoreClick}
+            disabled={restoreStatus.status === "uploading"}
+          >
+            {restoreStatus.status === "uploading" ? "Restoring..." : "Restore from Backup"}
+          </button>
+          {restoreStatus.message && (
+            <p className={`upload-status status-${restoreStatus.status}`} aria-live="polite">
+              {restoreStatus.message}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsTab({
   settingsController,
   projects,
@@ -7643,6 +7807,8 @@ function SettingsTab({
           <p className="helper-text">Select a project to customize shared prompt text.</p>
         )}
       </div>
+
+      <BackupRestoreSection />
     </div>
   );
 }
