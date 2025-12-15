@@ -12,9 +12,9 @@ SET "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%"
 
 echo.
-echo  ╔════════════════════════════════════════╗
-echo  ║         WORLD ENGINE INSTALLER         ║
-echo  ╚════════════════════════════════════════╝
+echo ===================================================
+echo   WORLD ENGINE INSTALLER
+echo ===================================================
 echo.
 
 echo Checking Node.js and npm setup...

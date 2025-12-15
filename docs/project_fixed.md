@@ -38,7 +38,7 @@ This doc is a handoff for anyone picking up the repo: what the app does, how itâ
   - `npm install`
 - Run dev servers (web + API concurrently):
   - `npm run dev`
-    - Web: `http://localhost:5173`
+    - Web: `http://localhost:6248`
     - API: `http://localhost:4000`
 - Lint / typecheck / tests:
   - `npm run lint`

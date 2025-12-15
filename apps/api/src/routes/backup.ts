@@ -126,7 +126,7 @@ backupRouter.get("/export", async (_req, res) => {
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 500 * 1024 * 1024, // 500MB max backup size
+    fileSize: 2 * 1024 * 1024 * 1024, // 2GB max backup size
   },
 });
 
@@ -137,7 +137,19 @@ const upload = multer({
  * Accepts multipart/form-data with a 'backup' file field.
  * WARNING: This will overwrite existing data!
  */
-backupRouter.post("/import", upload.single("backup"), async (req, res) => {
+backupRouter.post("/import", (req, res, next) => {
+  upload.single("backup")(req, res, (err) => {
+    if (err) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(413).json({ 
+          error: "Backup file is too large. Maximum size is 2GB. Consider using the import-file endpoint with a local file path instead." 
+        });
+      }
+      return res.status(400).json({ error: `Upload failed: ${err.message}` });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     const dataRoot = getDataRoot();
     const outputRoot = getOutputRoot();

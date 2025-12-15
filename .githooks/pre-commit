@@ -4,7 +4,7 @@
  * Block committing secrets and runtime output.
  * Denies any staged file matching .env* or apps/api/output/**
  */
-const { execSync } = require("node:child_process");
+import { execSync } from "node:child_process";
 
 function getStagedFiles() {
   try {

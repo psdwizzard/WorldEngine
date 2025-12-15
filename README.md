@@ -33,7 +33,7 @@ A web-based storyboard and world-building tool powered by Google Gemini AI. Crea
    ```bash
    npm run dev
    ```
-   - Web UI: http://localhost:5173
+   - Web UI: http://localhost:6248
    - API: http://localhost:4000
 
 ## Workspace data

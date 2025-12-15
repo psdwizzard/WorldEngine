@@ -7,6 +7,9 @@ const rootDir = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
+  server: {
+    port: 6248,
+  },
   resolve: {
     alias: {
       "@worldengine/shared": resolve(rootDir, "../../packages/shared/src"),

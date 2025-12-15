@@ -28,7 +28,7 @@
 - **Project-aware persistence is live**: assets/manifests live under `output/projects/<slug>` and character/location/item APIs filter by project.
 - **Prompt presets** can be edited per project (characters, locations, items, storyboard) and auto-populate generation flows.
 - Development servers running on:
-  - Web UI: http://localhost:5173
+  - Web UI: http://localhost:6248
   - API: http://localhost:4000
 - All TypeScript compilation passes without errors
 - API endpoints tested and working
