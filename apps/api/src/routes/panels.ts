@@ -1101,6 +1101,103 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
         const imgLeft = Math.round(centerX + offsetX * panelW - actualWidth / 2);
         const imgTop = Math.round(centerY + offsetY * panelH - actualHeight / 2);
 
+        // Optional layer mask for non-rectangular panels
+        let panelMask: Layer["mask"] | undefined;
+        if (panel.geometry.cornerOffsets) {
+          try {
+            const offsets = panel.geometry.cornerOffsets;
+            
+            // Calculate corner positions in panel-local coordinates
+            // Offsets are stored as fractions of panel size
+            const tlOff = offsets.topLeft ?? { x: 0, y: 0 };
+            const trOff = offsets.topRight ?? { x: 0, y: 0 };
+            const brOff = offsets.bottomRight ?? { x: 0, y: 0 };
+            const blOff = offsets.bottomLeft ?? { x: 0, y: 0 };
+            
+            // Corner positions in 0-1 local space (relative to original panel)
+            const corners = {
+              tl: { x: 0 + tlOff.x, y: 0 + tlOff.y },
+              tr: { x: 1 + trOff.x, y: 0 + trOff.y },
+              br: { x: 1 + brOff.x, y: 1 + brOff.y },
+              bl: { x: 0 + blOff.x, y: 1 + blOff.y },
+            };
+            
+            // Find bounding box of all corners
+            const minX = Math.min(corners.tl.x, corners.tr.x, corners.br.x, corners.bl.x);
+            const maxX = Math.max(corners.tl.x, corners.tr.x, corners.br.x, corners.bl.x);
+            const minY = Math.min(corners.tl.y, corners.tr.y, corners.br.y, corners.bl.y);
+            const maxY = Math.max(corners.tl.y, corners.tr.y, corners.br.y, corners.bl.y);
+            
+            const scaleX = maxX - minX;
+            const scaleY = maxY - minY;
+            
+            if (scaleX > 0 && scaleY > 0) {
+              // Expanded geometry in pixels
+              const expandedX = panelX + panelW * minX;
+              const expandedY = panelY + panelH * minY;
+              const expandedW = panelW * scaleX;
+              const expandedH = panelH * scaleY;
+              
+              // Convert corner positions to pixels within the expanded bounding box
+              const tl = { 
+                x: ((corners.tl.x - minX) / scaleX) * expandedW, 
+                y: ((corners.tl.y - minY) / scaleY) * expandedH 
+              };
+              const tr = { 
+                x: ((corners.tr.x - minX) / scaleX) * expandedW, 
+                y: ((corners.tr.y - minY) / scaleY) * expandedH 
+              };
+              const br = { 
+                x: ((corners.br.x - minX) / scaleX) * expandedW, 
+                y: ((corners.br.y - minY) / scaleY) * expandedH 
+              };
+              const bl = { 
+                x: ((corners.bl.x - minX) / scaleX) * expandedW, 
+                y: ((corners.bl.y - minY) / scaleY) * expandedH 
+              };
+              
+              const polygonPoints = `${tl.x},${tl.y} ${tr.x},${tr.y} ${br.x},${br.y} ${bl.x},${bl.y}`;
+
+              const maskSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${expandedW}" height="${expandedH}" viewBox="0 0 ${expandedW} ${expandedH}">
+                <polygon points="${polygonPoints}" fill="#ffffff" stroke="none"/>
+              </svg>`;
+
+              const maskBuffer = await sharp(Buffer.from(maskSvg)).png().toBuffer();
+              const maskRawData = await sharpToImageData(maskBuffer);
+              
+              // Extract alpha channel as grayscale mask data
+              // Mask data should be grayscale where white = visible, black = hidden
+              const maskWidth = maskRawData.width;
+              const maskHeight = maskRawData.height;
+              const grayscaleMask = new Uint8ClampedArray(maskWidth * maskHeight * 4);
+              for (let i = 0; i < maskWidth * maskHeight; i++) {
+                // Use alpha channel as grayscale value (white = opaque, black = transparent)
+                const alpha = maskRawData.data[i * 4 + 3];
+                grayscaleMask[i * 4] = alpha;     // R
+                grayscaleMask[i * 4 + 1] = alpha; // G
+                grayscaleMask[i * 4 + 2] = alpha; // B
+                grayscaleMask[i * 4 + 3] = 255;   // A (fully opaque mask layer)
+              }
+
+              // Mask uses expanded page coordinates
+              panelMask = {
+                top: Math.round(expandedY),
+                left: Math.round(expandedX),
+                bottom: Math.round(expandedY + expandedH),
+                right: Math.round(expandedX + expandedW),
+                defaultColor: 0,
+                imageData: {
+                  width: maskWidth,
+                  height: maskHeight,
+                  data: grayscaleMask,
+                },
+              };
+            }
+          } catch (maskError) {
+            console.warn("Failed to build panel mask:", maskError);
+          }
+        }
+
         // Create the panel layer
         const panelLayer: Layer = {
           name: panel.label || `Panel ${panel.order + 1}`,
@@ -1109,6 +1206,7 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
           top: imgTop,
           opacity: 1,
           blendMode: "normal",
+          mask: panelMask,
         };
 
         layers.push(panelLayer);
@@ -1123,28 +1221,74 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
 
           // Create stroke SVG - stroke is drawn ON the panel boundary
           let strokeSvg: string;
+          let strokeLeft = panelX;
+          let strokeTop = panelY;
+          
           if (offsets) {
             // Custom shape with corner offsets
-            // Offsets are fractions of panel size, corners start at panel edges
-            const tl = { 
-              x: (offsets.topLeft?.x ?? 0) * panelW, 
-              y: (offsets.topLeft?.y ?? 0) * panelH 
+            // Calculate expanded bounding box (same as mask)
+            const tlOff = offsets.topLeft ?? { x: 0, y: 0 };
+            const trOff = offsets.topRight ?? { x: 0, y: 0 };
+            const brOff = offsets.bottomRight ?? { x: 0, y: 0 };
+            const blOff = offsets.bottomLeft ?? { x: 0, y: 0 };
+            
+            const corners = {
+              tl: { x: 0 + tlOff.x, y: 0 + tlOff.y },
+              tr: { x: 1 + trOff.x, y: 0 + trOff.y },
+              br: { x: 1 + brOff.x, y: 1 + brOff.y },
+              bl: { x: 0 + blOff.x, y: 1 + blOff.y },
             };
-            const tr = { 
-              x: panelW + (offsets.topRight?.x ?? 0) * panelW, 
-              y: (offsets.topRight?.y ?? 0) * panelH 
-            };
-            const br = { 
-              x: panelW + (offsets.bottomRight?.x ?? 0) * panelW, 
-              y: panelH + (offsets.bottomRight?.y ?? 0) * panelH 
-            };
-            const bl = { 
-              x: (offsets.bottomLeft?.x ?? 0) * panelW, 
-              y: panelH + (offsets.bottomLeft?.y ?? 0) * panelH 
-            };
-            strokeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${panelW}" height="${panelH}" viewBox="0 0 ${panelW} ${panelH}">
-              <polygon points="${tl.x},${tl.y} ${tr.x},${tr.y} ${br.x},${br.y} ${bl.x},${bl.y}" fill="none" stroke="${strokeColor}" stroke-width="${sw}" stroke-linejoin="miter"/>
-            </svg>`;
+            
+            const minX = Math.min(corners.tl.x, corners.tr.x, corners.br.x, corners.bl.x);
+            const maxX = Math.max(corners.tl.x, corners.tr.x, corners.br.x, corners.bl.x);
+            const minY = Math.min(corners.tl.y, corners.tr.y, corners.br.y, corners.bl.y);
+            const maxY = Math.max(corners.tl.y, corners.tr.y, corners.br.y, corners.bl.y);
+            
+            const scaleX = maxX - minX;
+            const scaleY = maxY - minY;
+            
+            if (scaleX > 0 && scaleY > 0) {
+              // Expanded geometry in pixels
+              const expandedX = panelX + panelW * minX;
+              const expandedY = panelY + panelH * minY;
+              const expandedW = panelW * scaleX;
+              const expandedH = panelH * scaleY;
+              
+              // Add padding for stroke width
+              const strokePadding = Math.ceil(sw / 2) + 1;
+              const svgW = expandedW + strokePadding * 2;
+              const svgH = expandedH + strokePadding * 2;
+              
+              // Convert corner positions to pixels within the expanded + padded bounding box
+              const tl = { 
+                x: strokePadding + ((corners.tl.x - minX) / scaleX) * expandedW, 
+                y: strokePadding + ((corners.tl.y - minY) / scaleY) * expandedH 
+              };
+              const tr = { 
+                x: strokePadding + ((corners.tr.x - minX) / scaleX) * expandedW, 
+                y: strokePadding + ((corners.tr.y - minY) / scaleY) * expandedH 
+              };
+              const br = { 
+                x: strokePadding + ((corners.br.x - minX) / scaleX) * expandedW, 
+                y: strokePadding + ((corners.br.y - minY) / scaleY) * expandedH 
+              };
+              const bl = { 
+                x: strokePadding + ((corners.bl.x - minX) / scaleX) * expandedW, 
+                y: strokePadding + ((corners.bl.y - minY) / scaleY) * expandedH 
+              };
+              
+              strokeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
+                <polygon points="${tl.x},${tl.y} ${tr.x},${tr.y} ${br.x},${br.y} ${bl.x},${bl.y}" fill="none" stroke="${strokeColor}" stroke-width="${sw}" stroke-linejoin="miter"/>
+              </svg>`;
+              
+              strokeLeft = Math.round(expandedX - strokePadding);
+              strokeTop = Math.round(expandedY - strokePadding);
+            } else {
+              // Fallback to simple rectangle if geometry is degenerate
+              strokeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${panelW}" height="${panelH}" viewBox="0 0 ${panelW} ${panelH}">
+                <rect x="${sw / 2}" y="${sw / 2}" width="${panelW - sw}" height="${panelH - sw}" fill="none" stroke="${strokeColor}" stroke-width="${sw}"/>
+              </svg>`;
+            }
           } else {
             // Simple rectangle stroke - centered on the panel edge
             strokeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${panelW}" height="${panelH}" viewBox="0 0 ${panelW} ${panelH}">
@@ -1159,8 +1303,8 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
             layers.push({
               name: `${panel.label || `Panel ${panel.order + 1}`} - Stroke`,
               imageData: strokeImageData,
-              left: panelX,
-              top: panelY,
+              left: strokeLeft,
+              top: strokeTop,
               opacity: 1,
               blendMode: "normal",
             });
