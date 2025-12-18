@@ -11,6 +11,11 @@ export function createServer(env: EnvConfig) {
   app.use(cors());
   app.use(express.json({ limit: env.JSON_LIMIT }));
   app.use(express.urlencoded({ extended: true, limit: env.JSON_LIMIT }));
+  app.use((_req, res, next) => {
+    res.setHeader("cache-control", "no-store, max-age=0");
+    res.setHeader("x-content-type-options", "nosniff");
+    next();
+  });
 
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", uptime: process.uptime() });

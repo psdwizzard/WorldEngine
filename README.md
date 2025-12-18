@@ -29,12 +29,18 @@ A web-based storyboard and world-building tool powered by Google Gemini AI. Crea
      ```
    - Or enter it in the Settings tab (stored in localStorage)
 
-3. **Start the dev servers:**
+3. **Start the dev servers (both bind to 0.0.0.0 for LAN access):**
    ```bash
    npm run dev
    ```
-   - Web UI: http://localhost:6248
-   - API: http://localhost:4000
+   - Web UI: http://localhost:6248 (or `http://<your-machine-ip>:6248` from another device on the same network)
+   - API: http://localhost:4000 (also reachable via the host IP)
+
+4. **Accessing the API from other devices**  
+   The frontend now points at `<protocol>//<host>:4000` by default, so when you open the web UI from another machine it will reach the API running on the same host. If the API sits behind a different host/port (e.g., tunnels or containers), override the base URL by creating `apps/web/.env.local` with `VITE_API_BASE_URL=http://your-api-host:port` (you can optionally set `VITE_API_PORT` instead of hardcoding `:4000` in the URL).
+
+5. **Using the Photoshop plugin remotely**  
+   The plugin’s connection field now accepts plain hosts/hosts+ports (e.g., `192.168.1.123:4000`); it will add `http://` automatically and strip trailing slashes before trying to connect. Enter the same address your API is listening on, hit **Connect**, and the plugin will access projects/assets on that machine over the LAN.
 
 ## Workspace data
 

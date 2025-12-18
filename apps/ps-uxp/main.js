@@ -34,6 +34,16 @@
 
   const el = {};
 
+  function normalizeApiBaseUrl(value) {
+    if (!value) return '';
+    let uri = String(value).trim();
+    if (!uri) return '';
+    if (!/^https?:\/\//i.test(uri)) {
+      uri = `http://${uri}`;
+    }
+    return uri.replace(/\/+$/, '');
+  }
+
   /* ─────────────── Settings persistence ─────────────── */
   const SETTINGS_FILE = 'worldengine-settings.json';
 
@@ -44,7 +54,7 @@
       if (file) {
         const text = await file.read({ format: uxp.storage.formats.utf8 });
         const data = JSON.parse(text);
-        if (data.apiBaseUrl) state.apiBaseUrl = data.apiBaseUrl;
+        if (data.apiBaseUrl) state.apiBaseUrl = normalizeApiBaseUrl(data.apiBaseUrl) || state.apiBaseUrl;
         if (data.geminiKey) state.geminiKey = data.geminiKey;
         if (data.projectSlug) state.projectSlug = data.projectSlug;
         if (el.apiBaseUrl) el.apiBaseUrl.value = state.apiBaseUrl;
@@ -59,11 +69,11 @@
     try {
       const folder = await uxp.storage.localFileSystem.getDataFolder();
       const file = await folder.createFile(SETTINGS_FILE, { overwrite: true });
-      await file.write(JSON.stringify({
-        apiBaseUrl: state.apiBaseUrl,
-        geminiKey: state.geminiKey,
-        projectSlug: state.projectSlug,
-      }), { format: uxp.storage.formats.utf8 });
+    await file.write(JSON.stringify({
+      apiBaseUrl: state.apiBaseUrl,
+      geminiKey: state.geminiKey,
+      projectSlug: state.projectSlug,
+    }), { format: uxp.storage.formats.utf8 });
     } catch {
       // ignore
     }
@@ -243,8 +253,9 @@
 
   /* ─────────────── Connect ─────────────── */
   async function connect() {
-    state.apiBaseUrl = getVal(el.apiBaseUrl, 'http://localhost:4000');
+    state.apiBaseUrl = normalizeApiBaseUrl(getVal(el.apiBaseUrl, 'http://localhost:4000')) || 'http://localhost:4000';
     state.geminiKey = getVal(el.geminiKey, '');
+    if (el.apiBaseUrl) el.apiBaseUrl.value = state.apiBaseUrl;
     setStatus('Connecting…');
 
     const proj = await fetchJson('/projects');

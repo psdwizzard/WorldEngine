@@ -14,8 +14,28 @@ import type {
 
 type HeadersInit = Record<string, string>;
 
-// Default to the API dev port (4000). Env can override via VITE_API_BASE_URL.
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+const API_PORT = (import.meta.env.VITE_API_PORT as string | undefined) ?? "4000";
+
+function getDefaultHost(): string {
+  if (typeof window !== "undefined" && window.location?.hostname) {
+    return window.location.hostname;
+  }
+  return "localhost";
+}
+
+function getProtocol(): string {
+  if (typeof window !== "undefined" && window.location?.protocol) {
+    return window.location.protocol;
+  }
+  return "http:";
+}
+
+function buildDefaultApiBaseUrl(): string {
+  return `${getProtocol()}//${getDefaultHost()}:${API_PORT}`;
+}
+
+// Allow overriding base URL from the environment (e.g. for CI or custom setups).
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? buildDefaultApiBaseUrl();
 
 function resolveUrl(path: string) {
   if (path.startsWith("http")) return path;

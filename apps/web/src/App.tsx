@@ -81,11 +81,21 @@ const THOUGHT_TAIL_SCALE = 0.5;
 type ResizeCorner = "nw" | "ne" | "sw" | "se";
 type InteractionMode = "move" | "resize" | "image-pan";
 
-const generateId = () => {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
+const generateId = (): string => {
+  // crypto.randomUUID requires a secure context (HTTPS or localhost)
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // Falls through to manual generation
+    }
   }
-  return Math.random().toString(36).slice(2);
+  // Fallback: generate a valid UUID v4 format string
+  const hex = (n: number) =>
+    Array.from({ length: n }, () =>
+      Math.floor(Math.random() * 16).toString(16)
+    ).join("");
+  return `${hex(8)}-${hex(4)}-4${hex(3)}-${(8 + Math.floor(Math.random() * 4)).toString(16)}${hex(3)}-${hex(12)}`;
 };
 
 type InteractionState = {
@@ -2679,7 +2689,7 @@ function PanelsTab({
     
     const now = new Date().toISOString();
     const newCaption: StoryboardCaptionBox = {
-      id: crypto.randomUUID() as UUID,
+      id: generateId() as UUID,
       geometry: { x: 0.05, y: 0.05, width: 0.25, height: 0.08 },
       text: "Caption text...",
       fontFamily: "Courier New",
@@ -2786,7 +2796,7 @@ function PanelsTab({
 
     const now = new Date().toISOString();
     const newBubble: StoryboardBubble = {
-      id: crypto.randomUUID() as UUID,
+      id: generateId() as UUID,
       type,
       geometry: { x: 0.1, y: 0.1, width: 0.25, height: 0.12 },
       text: type === "speech" ? "Hello!" : "Hmm...",
@@ -2842,7 +2852,7 @@ function PanelsTab({
     newY = Math.max(0.02, Math.min(0.85, newY));
 
     const newBubble: StoryboardBubble = {
-      id: crypto.randomUUID() as UUID,
+      id: generateId() as UUID,
       type: parentBubble.type,
       geometry: { x: newX, y: newY, width: 0.2, height: 0.1 },
       text: "",
@@ -3650,7 +3660,7 @@ function PanelsTab({
       return [
         ...previous,
         {
-          id: crypto.randomUUID() as UUID,
+          id: generateId() as UUID,
           characterId: characterSelection.characterId as UUID,
           slotId: characterSelection.slotId,
         },
@@ -3682,7 +3692,7 @@ function PanelsTab({
       return [
         ...previous,
         {
-          id: crypto.randomUUID() as UUID,
+          id: generateId() as UUID,
           locationId: locationSelection.locationId as UUID,
           spotId: locationSelection.spotId,
         },
@@ -3714,7 +3724,7 @@ function PanelsTab({
       return [
         ...previous,
         {
-          id: crypto.randomUUID() as UUID,
+          id: generateId() as UUID,
           itemId: pendingItemId,
         },
       ];
@@ -5725,8 +5735,8 @@ function PanelsTab({
               });
 
               const tails: Array<{ d: string; stroke: string; strokeWidth: number; fill: string; key: string }> = [];
-              const parentTips: Array<{ d: string; stroke: string; strokeWidth: number; fill: string; key: string }> = [];
-              const ellipses: Array<{ cx: number; cy: number; rx: number; ry: number; fill: string; stroke: string; strokeWidth: number; key: string }> = [];
+              const parentTips: Array<{ d: string; stroke: string; strokeWidth: number; fill: string; key: string; type: "speech" | "thought" }> = [];
+              const bubbleShapes: Array<{ cx: number; cy: number; rx: number; ry: number; fill: string; stroke: string; strokeWidth: number; key: string; type: "speech" | "thought" }> = [];
 
               // Build tails (connector quads) in viewBox 100 space
               for (const child of linked) {
@@ -5802,22 +5812,50 @@ function PanelsTab({
                   const tipX = cx + (rMin + tailLen) * Math.cos(tailAngle);
                   const tipY = cy + (rMin + tailLen) * Math.sin(tailAngle);
 
-                  const d = `M ${base1X} ${base1Y} L ${tipX} ${tipY} L ${base2X} ${base2Y} Z`;
-                  parentTips.push({
-                    d,
-                    stroke: b.stroke,
-                    strokeWidth: strokeW,
-                    fill: b.fill,
-                    key: `ptip-${b.id}`,
-                  });
+                  // For thought bubbles, draw trailing circles instead of pointed tip
+                  if (b.type === "thought") {
+                    // Thought bubble: trailing circles
+                    const tailLen = rMin * Math.max(0.05, b.tailLength ?? 0.3);
+                    const c1Dist = rMin + tailLen * 0.4;
+                    const c2Dist = rMin + tailLen * 0.7;
+                    const c3Dist = rMin + tailLen * 1.0;
+                    const c1R = rMin * 0.12;
+                    const c2R = rMin * 0.08;
+                    const c3R = rMin * 0.05;
+                    const c1X = cx + c1Dist * Math.cos(tailAngle);
+                    const c1Y = cy + c1Dist * Math.sin(tailAngle);
+                    const c2X = cx + c2Dist * Math.cos(tailAngle);
+                    const c2Y = cy + c2Dist * Math.sin(tailAngle);
+                    const c3X = cx + c3Dist * Math.cos(tailAngle);
+                    const c3Y = cy + c3Dist * Math.sin(tailAngle);
+                    // Store as separate circles with a special structure
+                    parentTips.push({
+                      d: `M ${c1X - c1R} ${c1Y} A ${c1R} ${c1R} 0 1 0 ${c1X + c1R} ${c1Y} A ${c1R} ${c1R} 0 1 0 ${c1X - c1R} ${c1Y} Z M ${c2X - c2R} ${c2Y} A ${c2R} ${c2R} 0 1 0 ${c2X + c2R} ${c2Y} A ${c2R} ${c2R} 0 1 0 ${c2X - c2R} ${c2Y} Z M ${c3X - c3R} ${c3Y} A ${c3R} ${c3R} 0 1 0 ${c3X + c3R} ${c3Y} A ${c3R} ${c3R} 0 1 0 ${c3X - c3R} ${c3Y} Z`,
+                      stroke: b.stroke,
+                      strokeWidth: strokeW,
+                      fill: b.fill,
+                      key: `ptip-${b.id}`,
+                      type: "thought",
+                    });
+                  } else {
+                    const d = `M ${base1X} ${base1Y} L ${tipX} ${tipY} L ${base2X} ${base2Y} Z`;
+                    parentTips.push({
+                      d,
+                      stroke: b.stroke,
+                      strokeWidth: strokeW,
+                      fill: b.fill,
+                      key: `ptip-${b.id}`,
+                      type: "speech",
+                    });
+                  }
                 });
 
-              // Bubble ellipses for linked bubbles (slightly inset to sit under outline)
+              // Bubble shapes for linked bubbles (slightly inset to sit under outline)
               (page.bubbles ?? [])
                 .filter((b) => linkedIds.has(b.id))
                 .forEach((b) => {
-                  ellipses.push({
-                    key: `ellipse-${b.id}`,
+                  bubbleShapes.push({
+                    key: `shape-${b.id}`,
                     cx: (b.geometry.x + b.geometry.width / 2) * 100,
                     cy: (b.geometry.y + b.geometry.height / 2) * 100,
                     rx: (b.geometry.width / 2) * 100 * 0.9,
@@ -5825,6 +5863,7 @@ function PanelsTab({
                     fill: b.fill,
                     stroke: b.stroke,
                     strokeWidth: b.strokeWidth ?? 2,
+                    type: b.type,
                   });
                 });
 
@@ -5853,8 +5892,39 @@ function PanelsTab({
                     {tails.map((t) => (
                       <path key={`ol-${t.key}`} d={t.d} vectorEffect="non-scaling-stroke" />
                     ))}
-                    {ellipses.map((b) => (
-                      <ellipse key={`ol-${b.key}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} vectorEffect="non-scaling-stroke" />
+                    {bubbleShapes.map((b) => (
+                      b.type === "thought" ? (
+                        <path
+                          key={`ol-${b.key}`}
+                          d={(() => {
+                            // Generate cloud path for thought bubble
+                            const numBumps = 8;
+                            const points: Array<{ x: number; y: number; bx: number; by: number }> = [];
+                            for (let i = 0; i < numBumps; i++) {
+                              const angle = (i / numBumps) * Math.PI * 2;
+                              const nextAngle = ((i + 1) / numBumps) * Math.PI * 2;
+                              const midAngle = (angle + nextAngle) / 2;
+                              const bumpOut = 0.12 * Math.sin(i * 2.3 + 1);
+                              const bumpFactor = 0.18 + 0.08 * Math.sin(i * 3.7);
+                              points.push({
+                                x: b.cx + b.rx * (1 + bumpOut) * Math.cos(angle),
+                                y: b.cy + b.ry * (1 + bumpOut) * Math.sin(angle),
+                                bx: b.cx + b.rx * (1 + bumpFactor) * Math.cos(midAngle),
+                                by: b.cy + b.ry * (1 + bumpFactor) * Math.sin(midAngle),
+                              });
+                            }
+                            let path = `M ${points[0].x} ${points[0].y}`;
+                            for (let i = 0; i < points.length; i++) {
+                              const next = points[(i + 1) % points.length];
+                              path += ` Q ${points[i].bx} ${points[i].by} ${next.x} ${next.y}`;
+                            }
+                            return path + " Z";
+                          })()}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      ) : (
+                        <ellipse key={`ol-${b.key}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} vectorEffect="non-scaling-stroke" />
+                      )
                     ))}
                     {parentTips.map((t) => (
                       <path key={`ol-${t.key}`} d={t.d} vectorEffect="non-scaling-stroke" />
@@ -5865,8 +5935,40 @@ function PanelsTab({
                   {tails.map((t) => (
                     <path key={`fill-${t.key}`} d={t.d} fill={t.fill} stroke="none" />
                   ))}
-                  {ellipses.map((b) => (
-                    <ellipse key={`fill-${b.key}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} fill={b.fill} stroke="none" />
+                  {bubbleShapes.map((b) => (
+                    b.type === "thought" ? (
+                      <path
+                        key={`fill-${b.key}`}
+                        d={(() => {
+                          // Generate cloud path for thought bubble
+                          const numBumps = 8;
+                          const points: Array<{ x: number; y: number; bx: number; by: number }> = [];
+                          for (let i = 0; i < numBumps; i++) {
+                            const angle = (i / numBumps) * Math.PI * 2;
+                            const nextAngle = ((i + 1) / numBumps) * Math.PI * 2;
+                            const midAngle = (angle + nextAngle) / 2;
+                            const bumpOut = 0.12 * Math.sin(i * 2.3 + 1);
+                            const bumpFactor = 0.18 + 0.08 * Math.sin(i * 3.7);
+                            points.push({
+                              x: b.cx + b.rx * (1 + bumpOut) * Math.cos(angle),
+                              y: b.cy + b.ry * (1 + bumpOut) * Math.sin(angle),
+                              bx: b.cx + b.rx * (1 + bumpFactor) * Math.cos(midAngle),
+                              by: b.cy + b.ry * (1 + bumpFactor) * Math.sin(midAngle),
+                            });
+                          }
+                          let path = `M ${points[0].x} ${points[0].y}`;
+                          for (let i = 0; i < points.length; i++) {
+                            const next = points[(i + 1) % points.length];
+                            path += ` Q ${points[i].bx} ${points[i].by} ${next.x} ${next.y}`;
+                          }
+                          return path + " Z";
+                        })()}
+                        fill={b.fill}
+                        stroke="none"
+                      />
+                    ) : (
+                      <ellipse key={`fill-${b.key}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} fill={b.fill} stroke="none" />
+                    )
                   ))}
                   {parentTips.map((t) => (
                     <path key={`fill-${t.key}`} d={t.d} fill={t.fill} stroke="none" />
