@@ -12,14 +12,24 @@ set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%" || goto :error_cd
 
 echo.
-echo =============================================================
-echo   WORLD ENGINE v0.1.3 - AI-Powered Comic Panel Generation
-echo =============================================================
+echo ================================================================
+echo WORLD ENGINE v0.1.3
+echo AI-Powered Comic Panel Generation System
+echo ================================================================
 echo.
-echo   Web UI: Characters, Locations, Items, Panels
-echo   AI image generation via Google Gemini
-echo   Speech bubbles and PSD export
-echo   Photoshop plugin: PhotoshopPlugin\WorldEnine_Photoshop-013.ccx
+echo FEATURES:
+echo - Web UI for managing Characters, Locations, Items, and Panels
+echo - AI image generation via Google Gemini API
+echo - Multi-reference asset selection for consistent character rendering
+echo - Automatic speech bubble layout and text placement
+echo - PNG and PSD output with layer organization
+echo.
+echo PHOTOSHOP PLUGIN:
+echo - Install the plugin from: PhotoshopPlugin\WorldEnine_Photoshop-013.ccx
+echo - Use Adobe UXP Developer Tool to load the plugin
+echo - Generate images directly into Photoshop layers
+echo - Use marquee/lasso selection to create layer masks automatically
+echo - Select reference assets from your project within Photoshop
 echo.
 
 if not exist "package.json" (
