@@ -1814,26 +1814,38 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
         // Match PNG text layout
         const fontSize = (bubble.fontSize ?? 0.85) * 16 * exportScale;
         const lineHeight = fontSize * 1.2;
+        // Match PNG export: padding based on smaller dimension
         const textPadding = 0.1 * Math.min(bubW, bubH);
         const maxTextW = Math.max(1, bubW - textPadding * 2);
         const textAreaTop = bubH * 0.1;
         const textAreaBottom = bubH * (0.7 - (bubble.tailLength ?? 0) * 0.2);
         const textAreaHeight = Math.max(1, textAreaBottom - textAreaTop);
-        const charsPerLine = Math.max(3, Math.floor(maxTextW / (fontSize * 0.55)));
+        // Approximate character width (Comic Sans averages ~0.5-0.6 of font size)
+        const avgCharWidth = fontSize * 0.55;
 
-        const words = bubble.text.split(/\s+/);
+        // Match PNG export: split into paragraphs first, then wrap each
+        // Handle all line ending styles: Windows (\r\n), Unix (\n), old Mac (\r)
         const lines: string[] = [];
-        let line = "";
-        for (const w of words) {
-          const test = line ? `${line} ${w}` : w;
-          if (test.length > charsPerLine && line) {
-            lines.push(line);
-            line = w;
-          } else {
-            line = test;
+        const paragraphs = bubble.text.split(/\r\n|\r|\n/);
+        for (const paragraph of paragraphs) {
+          if (paragraph.trim() === "") {
+            lines.push("");
+            continue;
           }
+          const words = paragraph.split(/\s+/);
+          let currentLine = "";
+          for (const word of words) {
+            const testLine = currentLine ? `${currentLine} ${word}` : word;
+            const estimatedWidth = testLine.length * avgCharWidth;
+            if (estimatedWidth > maxTextW && currentLine) {
+              lines.push(currentLine);
+              currentLine = word;
+            } else {
+              currentLine = testLine;
+            }
+          }
+          if (currentLine) lines.push(currentLine);
         }
-        if (line) lines.push(line);
 
         const totalH = lines.length * lineHeight;
         const startY = textAreaTop + (textAreaHeight - totalH) / 2 + lineHeight / 2;
@@ -1845,7 +1857,7 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
         }).join("");
 
         const textSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${bubW}" height="${bubH}">
-          <text font-family="${bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif"}" font-size="${fontSize}" fill="#000000">${tspans}</text>
+          <text font-family="${bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif"}" font-size="${fontSize}" fill="#000000" dominant-baseline="central">${tspans}</text>
         </svg>`;
 
         const buf = await sharp(Buffer.from(textSvg)).png().toBuffer();
@@ -1951,27 +1963,38 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
           if (bubble.text) {
             const fontSize = (bubble.fontSize ?? 0.85) * 16 * exportScale;
             const lineHeight = fontSize * 1.2;
+            // Match PNG export: padding based on smaller dimension
             const textPadding = 0.1 * Math.min(bubW, bubH);
             const maxTextW = Math.max(1, bubW - textPadding * 2);
             // Use LOCAL coordinates (0-based within SVG), not page coordinates!
             const textAreaTop = bubH * 0.1;
             const textAreaBottom = bubH * (0.7 - tailLength * 0.2);
             const textAreaHeight = Math.max(1, textAreaBottom - textAreaTop);
-            const charsPerLine = Math.max(3, Math.floor(maxTextW / (fontSize * 0.55)));
+            // Approximate character width (Comic Sans averages ~0.5-0.6 of font size)
+            const avgCharWidth = fontSize * 0.55;
 
-            const words = bubble.text.split(/\s+/);
+            // Match PNG export: split into paragraphs first, then wrap each
             const lines: string[] = [];
-            let line = "";
-            for (const w of words) {
-              const test = line ? `${line} ${w}` : w;
-              if (test.length > charsPerLine && line) {
-                lines.push(line);
-                line = w;
-              } else {
-                line = test;
+            const paragraphs = bubble.text.split(/\r\n|\r|\n/);
+            for (const paragraph of paragraphs) {
+              if (paragraph.trim() === "") {
+                lines.push("");
+                continue;
               }
+              const words = paragraph.split(/\s+/);
+              let currentLine = "";
+              for (const word of words) {
+                const testLine = currentLine ? `${currentLine} ${word}` : word;
+                const estimatedWidth = testLine.length * avgCharWidth;
+                if (estimatedWidth > maxTextW && currentLine) {
+                  lines.push(currentLine);
+                  currentLine = word;
+                } else {
+                  currentLine = testLine;
+                }
+              }
+              if (currentLine) lines.push(currentLine);
             }
-            if (line) lines.push(line);
 
             const totalH = lines.length * lineHeight;
             const startY = textAreaTop + (textAreaHeight - totalH) / 2 + lineHeight / 2;
@@ -1983,7 +2006,7 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
             }).join("");
 
             const textSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${bubW}" height="${bubH}">
-              <text font-family="${bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif"}" font-size="${fontSize}" fill="#000000">${tspans}</text>
+              <text font-family="${bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif"}" font-size="${fontSize}" fill="#000000" dominant-baseline="central">${tspans}</text>
             </svg>`;
 
             try {
@@ -2046,27 +2069,39 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
         try {
           const fontSize = (bubble.fontSize ?? 0.85) * 16 * exportScale;
           const lineHeight = fontSize * 1.2;
+          // Match PNG export: padding based on smaller dimension
           const textPadding = 0.1 * Math.min(bubW, bubH);
           const maxTextW = Math.max(1, bubW - textPadding * 2);
           // Use LOCAL coordinates (0-based within SVG), not page coordinates!
           const textAreaTop = bubH * 0.1;
           const textAreaBottom = bubH * (0.7 - tailLength * 0.2);
           const textAreaHeight = Math.max(1, textAreaBottom - textAreaTop);
-          const charsPerLine = Math.max(3, Math.floor(maxTextW / (fontSize * 0.55)));
+          // Approximate character width (Comic Sans averages ~0.5-0.6 of font size)
+          const avgCharWidth = fontSize * 0.55;
           
-          const words = bubble.text.split(/\s+/);
+          // Match PNG export: split into paragraphs first, then wrap each
           const lines: string[] = [];
-          let line = "";
-          for (const w of words) {
-            const test = line ? `${line} ${w}` : w;
-            if (test.length > charsPerLine && line) {
-              lines.push(line);
-              line = w;
-            } else {
-              line = test;
+          const paragraphs = bubble.text.split(/\r\n|\r|\n/);
+          for (const paragraph of paragraphs) {
+            if (paragraph.trim() === "") {
+              lines.push("");
+              continue;
             }
+            const words = paragraph.split(/\s+/);
+            let currentLine = "";
+            for (const word of words) {
+              const testLine = currentLine ? `${currentLine} ${word}` : word;
+              // Estimate width based on character count
+              const estimatedWidth = testLine.length * avgCharWidth;
+              if (estimatedWidth > maxTextW && currentLine) {
+                lines.push(currentLine);
+                currentLine = word;
+              } else {
+                currentLine = testLine;
+              }
+            }
+            if (currentLine) lines.push(currentLine);
           }
-          if (line) lines.push(line);
 
           const totalH = lines.length * lineHeight;
           const startY = textAreaTop + (textAreaHeight - totalH) / 2 + lineHeight / 2;
@@ -2078,7 +2113,7 @@ panelsRouter.post("/pages/:pageId/export-psd", async (req, res) => {
           }).join("");
 
           const textSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${bubW}" height="${bubH}">
-            <text font-family="${bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif"}" font-size="${fontSize}" fill="#000000">${tspans}</text>
+            <text font-family="${bubble.fontFamily ?? "Comic Sans MS, cursive, sans-serif"}" font-size="${fontSize}" fill="#000000" dominant-baseline="central">${tspans}</text>
           </svg>`;
 
           const textBuffer = await sharp(Buffer.from(textSvg)).png().toBuffer();
