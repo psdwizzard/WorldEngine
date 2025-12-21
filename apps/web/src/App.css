@@ -113,6 +113,8 @@ body {
   justify-content: center;
   z-index: 1000;
   animation: fadeIn 0.15s ease;
+  padding: 2rem 1rem;
+  overflow-y: auto;
 }
 
 @keyframes fadeIn {
@@ -127,6 +129,8 @@ body {
   padding: 1.5rem;
   min-width: 360px;
   max-width: 90vw;
+  max-height: calc(100vh - 4rem);
+  overflow-y: auto;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
   animation: slideUp 0.2s ease;
 }

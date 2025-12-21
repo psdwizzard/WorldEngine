@@ -10,6 +10,8 @@ export type WorkspaceSettings = {
   selectedIssue?: string;
   /** Custom issues created by the user (persisted across sessions) */
   customIssues?: string[];
+  /** Skip delete confirmations for panels/captions/bubbles. */
+  instantDelete?: boolean;
 };
 
 type SettingsStatus = "idle" | "dirty" | "saving" | "saved";
@@ -23,6 +25,7 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   projectId: undefined,
   projectSlug: "",
   defaultPageBackgroundColor: undefined,
+  instantDelete: false,
 };
 
 function readSettings(): WorkspaceSettings {

@@ -468,21 +468,6 @@ export function App() {
               </option>
             ))}
           </select>
-          <select
-            className="header-select"
-            value={selectedIssue}
-            onChange={(e) => handleIssueChange(e.target.value)}
-            title="Select issue"
-          >
-            <option value="">All issues</option>
-            <option value="__new__">+ New Issue...</option>
-            {uniqueIssues.map((issue) => (
-              <option key={issue} value={issue}>
-                {issue}
-              </option>
-            ))}
-          </select>
-          <div className="header-divider" />
           <button
             type="button"
             className="header-btn"
@@ -498,103 +483,119 @@ export function App() {
             <span className="header-btn-icon">+</span>
             New
           </button>
+          <select
+            className="header-select"
+            value={selectedIssue}
+            onChange={(e) => handleIssueChange(e.target.value)}
+            title="Select issue"
+          >
+            <option value="">All issues</option>
+            <option value="__new__">+ New Issue...</option>
+            {uniqueIssues.map((issue) => (
+              <option key={issue} value={issue}>
+                {issue}
+              </option>
+            ))}
+          </select>
+          <div className="header-divider" />
         </div>
-        {showNewProjectModal && (
-          <div className="modal-overlay" onClick={() => setShowNewProjectModal(false)}>
-            <div className="modal-content new-project-modal" onClick={(e) => e.stopPropagation()}>
-              <h3>Create New Project</h3>
-              <div className="field">
-                <label htmlFor="header-new-project-name">Project name</label>
-                <input
-                  id="header-new-project-name"
-                  type="text"
-                  placeholder="My Awesome Project"
-                  value={headerNewProjectName}
-                  onChange={(e) => setHeaderNewProjectName(e.target.value)}
-                  autoFocus
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="header-new-project-issue">Issue (optional)</label>
-                <input
-                  id="header-new-project-issue"
-                  type="text"
-                  list="issue-suggestions"
-                  placeholder="Select or type an issue..."
-                  value={headerNewProjectIssue}
-                  onChange={(e) => setHeaderNewProjectIssue(e.target.value)}
-                />
-                <datalist id="issue-suggestions">
-                  {uniqueIssues.map((issue) => (
-                    <option key={issue} value={issue} />
-                  ))}
-                </datalist>
-              </div>
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => setShowNewProjectModal(false)}
-                  disabled={headerProjectCreating}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={handleHeaderCreateProject}
-                  disabled={headerProjectCreating || !headerNewProjectName.trim()}
-                >
-                  {headerProjectCreating ? "Creating..." : "Create"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        {showNewIssueModal && (
-          <div className="modal-overlay" onClick={() => setShowNewIssueModal(false)}>
-            <div className="modal-content new-issue-modal" onClick={(e) => e.stopPropagation()}>
-              <h3>New Issue</h3>
-              <div className="field">
-                <label htmlFor="new-issue-name">Issue name</label>
-                <input
-                  id="new-issue-name"
-                  type="text"
-                  placeholder="Issue 4"
-                  value={newIssueName}
-                  onChange={(e) => setNewIssueName(e.target.value)}
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && newIssueName.trim()) {
-                      handleCreateIssue();
-                    }
-                  }}
-                />
-              </div>
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => {
-                    setShowNewIssueModal(false);
-                    setNewIssueName("");
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={handleCreateIssue}
-                  disabled={!newIssueName.trim()}
-                >
-                  Add Issue
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </header>
+
+      {showNewProjectModal && (
+        <div className="modal-overlay" onClick={() => setShowNewProjectModal(false)}>
+          <div className="modal-content new-project-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Create New Project</h3>
+            <div className="field">
+              <label htmlFor="header-new-project-name">Project name</label>
+              <input
+                id="header-new-project-name"
+                type="text"
+                placeholder="My Awesome Project"
+                value={headerNewProjectName}
+                onChange={(e) => setHeaderNewProjectName(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="header-new-project-issue">Issue (optional)</label>
+              <input
+                id="header-new-project-issue"
+                type="text"
+                list="issue-suggestions"
+                placeholder="Select or type an issue..."
+                value={headerNewProjectIssue}
+                onChange={(e) => setHeaderNewProjectIssue(e.target.value)}
+              />
+              <datalist id="issue-suggestions">
+                {uniqueIssues.map((issue) => (
+                  <option key={issue} value={issue} />
+                ))}
+              </datalist>
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setShowNewProjectModal(false)}
+                disabled={headerProjectCreating}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={handleHeaderCreateProject}
+                disabled={headerProjectCreating || !headerNewProjectName.trim()}
+              >
+                {headerProjectCreating ? "Creating..." : "Create"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showNewIssueModal && (
+        <div className="modal-overlay" onClick={() => setShowNewIssueModal(false)}>
+          <div className="modal-content new-issue-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>New Issue</h3>
+            <div className="field">
+              <label htmlFor="new-issue-name">Issue name</label>
+              <input
+                id="new-issue-name"
+                type="text"
+                placeholder="Issue 4"
+                value={newIssueName}
+                onChange={(e) => setNewIssueName(e.target.value)}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newIssueName.trim()) {
+                    handleCreateIssue();
+                  }
+                }}
+              />
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  setShowNewIssueModal(false);
+                  setNewIssueName("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={handleCreateIssue}
+                disabled={!newIssueName.trim()}
+              >
+                Add Issue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="app-main">
         <aside className="tab-nav" aria-label="Primary">
@@ -2378,6 +2379,15 @@ function PanelsTab({
   const [selectedPanelId, setSelectedPanelId] = useState<UUID | null>(null);
   const [selectedCaptionId, setSelectedCaptionId] = useState<UUID | null>(null);
   const [selectedBubbleId, setSelectedBubbleId] = useState<UUID | null>(null);
+  const confirmDelete = useCallback(
+    (message: string) => {
+      if (settings.instantDelete) {
+        return true;
+      }
+      return window.confirm(message);
+    },
+    [settings.instantDelete],
+  );
   const [hasChanges, setHasChanges] = useState(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [canvasDisplayWidth, setCanvasDisplayWidth] = useState(0);
@@ -2712,6 +2722,10 @@ function PanelsTab({
 
   const handleDeleteCaptionBox = useCallback(
     (captionId: UUID) => {
+      if (!confirmDelete("Delete this caption box? This cannot be undone.")) {
+        return;
+      }
+
       setPage((previous) => {
         if (!previous) return previous;
         const captionBoxes = previous.captionBoxes ?? [];
@@ -2728,7 +2742,7 @@ function PanelsTab({
       }
       markDirty();
     },
-    [selectedCaptionId, markDirty],
+    [confirmDelete, selectedCaptionId, markDirty],
   );
 
   const selectedCaption = useMemo(() => {
@@ -2875,6 +2889,10 @@ function PanelsTab({
 
   const handleDeleteBubble = useCallback(
     (bubbleId: UUID) => {
+      if (!confirmDelete("Delete this bubble? This cannot be undone.")) {
+        return;
+      }
+
       setPage((previous) => {
         if (!previous) return previous;
         const bubbles = previous.bubbles ?? [];
@@ -2891,13 +2909,14 @@ function PanelsTab({
       }
       markDirty();
     },
-    [selectedBubbleId, markDirty],
+    [confirmDelete, selectedBubbleId, markDirty],
   );
 
   const selectedBubble = useMemo(() => {
     if (!page || !selectedBubbleId) return null;
     return page.bubbles?.find((b) => b.id === selectedBubbleId) ?? null;
   }, [page, selectedBubbleId]);
+
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
@@ -3926,6 +3945,11 @@ function PanelsTab({
       return;
     }
 
+    const panelLabel = page.panels.find((panel) => panel.id === panelId)?.label ?? "this panel";
+    if (!confirmDelete(`Delete ${panelLabel}? This cannot be undone.`)) {
+      return;
+    }
+
     setStatus("saving");
     setError(null);
 
@@ -3965,7 +3989,40 @@ function PanelsTab({
       setError(cause instanceof Error ? cause.message : "Failed to delete panel");
       setStatus("error");
     }
-  }, [editingPanelId, page, selectedPanelId, settings.geminiKey, settings.projectSlug]);
+  }, [confirmDelete, editingPanelId, page, selectedPanelId, settings.geminiKey, settings.projectSlug]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Delete") return;
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tagName = target.tagName;
+        if (tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT" || target.isContentEditable) {
+          return;
+        }
+      }
+
+      if (selectedBubble) {
+        handleDeleteBubble(selectedBubble.id);
+        event.preventDefault();
+        return;
+      }
+
+      if (selectedCaption) {
+        handleDeleteCaptionBox(selectedCaption.id);
+        event.preventDefault();
+        return;
+      }
+
+      if (selectedPanel) {
+        void handleDeletePanel(selectedPanel.id);
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleDeleteBubble, handleDeleteCaptionBox, handleDeletePanel, selectedBubble, selectedCaption, selectedPanel]);
 
   const handlePanelAssetUpload = useCallback(
     async (panelId: UUID, file: File) => {
@@ -7504,6 +7561,16 @@ function SettingsTab({
             <option value="1024">1024 x 1024</option>
             <option value="1536">1536 x 1536</option>
           </select>
+        </div>
+        <div className="field">
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={Boolean(settings.instantDelete)}
+              onChange={(event) => updateSetting("instantDelete", event.target.checked)}
+            />
+            Instant delete (skip confirmation prompts)
+          </label>
         </div>
         <div className="settings-actions">
           <button type="submit" className="primary" disabled={isSaving || status === "saved"}>
