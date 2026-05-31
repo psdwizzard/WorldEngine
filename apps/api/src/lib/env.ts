@@ -35,6 +35,10 @@ export function loadEnv(): EnvConfig {
   load({ path: ".env.local", override: false });
   // Load API-specific env placed under apps/api/.env.local
   load({ path: path.join(repoRoot, "apps", "api", ".env.local"), override: false });
+  // Load hosted-mode config (Gemini key + Cloudflare Access settings) so the
+  // API picks up production env even when started directly via `npm run serve`
+  // instead of through run-forge.bat's env-loading loop.
+  load({ path: path.join(repoRoot, ".env.forge"), override: false });
 
   if (process.env.VITEST) {
     process.env.NODE_ENV = "test";
