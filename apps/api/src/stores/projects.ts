@@ -93,8 +93,14 @@ export function findProjectBySlug(slug: string): ProjectRecord | null {
 
 export function userOwnsProjectSlug(userKey: string | undefined, slug: string): boolean {
   if (!userKey) return true;
-  const project = findProjectBySlug(slug);
-  return Boolean(project && project.userKey === userKey);
+  // Slugs are unique per-user (ensureUniqueSlug filters by owner), so multiple
+  // projects can share the same slug across users. Iterate all matches and look
+  // for the one owned by this user; otherwise findProjectBySlug returns the
+  // first arbitrary record and silently 404s legitimate assets.
+  for (const project of projects.values()) {
+    if (project.slug === slug && project.userKey === userKey) return true;
+  }
+  return false;
 }
 
 export async function createProject(input: {
