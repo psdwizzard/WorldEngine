@@ -26,13 +26,16 @@ function slugifyName(name: string) {
   return normalized.length > 0 ? normalized : "project";
 }
 
-function ensureUniqueSlug(baseSlug: string, userKey?: string) {
+function ensureUniqueSlug(baseSlug: string) {
+  // Slugs MUST be globally unique because the on-disk layout is
+  // `workspace-data/projects/<slug>/...` (shared by characters/locations/items/
+  // panels/asset files). Two users with the same slug would write into the
+  // same directory and see each other's data. Per-owner uniqueness was a
+  // privacy bug; collisions now resolve via -2/-3 suffixes regardless of owner.
   let candidate = baseSlug;
   let suffix = 2;
   const existing = new Set(
-    Array.from(projects.values())
-      .filter((project) => !userKey || project.userKey === userKey)
-      .map((project) => project.slug),
+    Array.from(projects.values()).map((project) => project.slug),
   );
   while (existing.has(candidate)) {
     candidate = `${baseSlug}-${suffix}`;
@@ -115,7 +118,7 @@ export async function createProject(input: {
   ensureInitialized();
   const now = new Date().toISOString();
   const baseSlug = slugifyName(input.slug ?? input.name);
-  const uniqueSlug = ensureUniqueSlug(baseSlug, input.userKey);
+  const uniqueSlug = ensureUniqueSlug(baseSlug);
   const id = randomUUID();
   const project: ProjectRecord = {
     id,
@@ -144,7 +147,7 @@ export async function updateProject(projectId: UUID, updates: Partial<Omit<Proje
 
   let slug = existing.slug;
   if (updates.slug && updates.slug !== existing.slug) {
-    slug = ensureUniqueSlug(slugifyName(updates.slug), existing.userKey);
+    slug = ensureUniqueSlug(slugifyName(updates.slug));
   }
 
   const updated: ProjectRecord = {
