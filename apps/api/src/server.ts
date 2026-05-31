@@ -39,6 +39,12 @@ export function createServer(env: EnvConfig) {
     res.json({ email: user.email, role: user.role });
   });
 
+  // Serve built SPA static files (web/dist) BEFORE /assets/:assetId so
+  // vite-hashed bundles like /assets/index-*.js resolve from disk instead of
+  // being swallowed by the API asset-store route (which 404s when the path
+  // isn't a known asset UUID).
+  app.use(express.static(webDistDir));
+
   app.get("/assets/:assetId", (req, res) => {
     const asset = getAsset(req.params.assetId);
     if (!asset) {
@@ -68,7 +74,6 @@ export function createServer(env: EnvConfig) {
 
   registerRoutes(app);
 
-  app.use(express.static(webDistDir));
   app.get("*", (_req, res, next) => {
     res.sendFile(path.join(webDistDir, "index.html"), (error) => {
       if (error) next();
