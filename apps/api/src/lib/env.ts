@@ -38,7 +38,13 @@ export function loadEnv(): EnvConfig {
   // Load hosted-mode config (Gemini key + Cloudflare Access settings) so the
   // API picks up production env even when started directly via `npm run serve`
   // instead of through run-forge.bat's env-loading loop.
-  load({ path: path.join(repoRoot, ".env.forge"), override: false });
+  //
+  // Uses override: true intentionally. The file represents the canonical
+  // hosted-mode config for this deployment, and must beat any inherited
+  // process.env vars from the parent shell (e.g., a foreman session that
+  // injects sibling-app CLOUDFLARE_ACCESS_AUD / PORT values). .env.local
+  // files above are still override:false so devs keep their local overrides.
+  load({ path: path.join(repoRoot, ".env.forge"), override: true });
 
   if (process.env.VITEST) {
     process.env.NODE_ENV = "test";
