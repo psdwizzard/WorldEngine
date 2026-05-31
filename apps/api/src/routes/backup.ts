@@ -12,6 +12,7 @@ import path from "node:path";
 import archiver from "archiver";
 import * as unzip from "unzip-stream";
 import multer from "multer";
+import { loadEnv } from "../lib/env";
 
 const repoRoot = path.resolve(process.cwd(), "..", "..");
 
@@ -42,6 +43,14 @@ async function pathExists(targetPath: string): Promise<boolean> {
 }
 
 export const backupRouter = Router();
+
+backupRouter.use((_req, res, next) => {
+  const env = loadEnv();
+  if (env.WORLDENGINE_HOSTED_BY_FORGE || env.WORLDENGINE_REQUIRE_AUTH) {
+    return res.status(403).json({ error: "backup_disabled_in_hosted_mode" });
+  }
+  return next();
+});
 
 /**
  * GET /backup/export

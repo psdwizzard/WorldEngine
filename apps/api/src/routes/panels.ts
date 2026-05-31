@@ -15,6 +15,7 @@ import {
 import { resolveProjectSlug } from "../lib/projectScope";
 import { findProjectBySlug } from "../stores/projects";
 import { getAsset, getAssetBuffer, saveAsset, saveAssetBuffer } from "../services/assetStore";
+import { requestGeminiKey } from "../lib/managedKey";
 import sharp from "sharp";
 import { writePsd, Layer, Psd } from "ag-psd";
 import { loadEnv } from "../lib/env";
@@ -562,7 +563,7 @@ panelsRouter.post("/render", async (req, res) => {
     };
 
     const result = await generateImage(env, generationRequest, {
-      apiKeyOverride: req.header("x-gemini-key") ?? undefined,
+      apiKeyOverride: requestGeminiKey(req, env),
     });
 
     const asset = await saveAssetBuffer(result.imageBuffer, {
@@ -695,7 +696,7 @@ panelsRouter.post("/edit", async (req, res) => {
         },
       },
       {
-        apiKeyOverride: req.header("x-gemini-key") ?? undefined,
+        apiKeyOverride: requestGeminiKey(req, env),
       },
     );
 

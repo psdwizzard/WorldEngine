@@ -4,7 +4,7 @@ import path from "node:path";
 import type { ProjectSummary, PromptPresetSet, UUID } from "@worldengine/shared";
 import { DEFAULT_DATA_ROOT } from "../lib/env";
 
-type ProjectRecord = ProjectSummary;
+type ProjectRecord = ProjectSummary & { userKey?: string };
 
 const projects = new Map<UUID, ProjectRecord>();
 
@@ -26,10 +26,14 @@ function slugifyName(name: string) {
   return normalized.length > 0 ? normalized : "project";
 }
 
-function ensureUniqueSlug(baseSlug: string) {
+function ensureUniqueSlug(baseSlug: string, userKey?: string) {
   let candidate = baseSlug;
   let suffix = 2;
-  const existing = new Set(Array.from(projects.values()).map((project) => project.slug));
+  const existing = new Set(
+    Array.from(projects.values())
+      .filter((project) => !userKey || project.userKey === userKey)
+      .map((project) => project.slug),
+  );
   while (existing.has(candidate)) {
     candidate = `${baseSlug}-${suffix}`;
     suffix += 1;
@@ -65,9 +69,11 @@ export async function initializeProjectStore(root: string) {
   initialized = true;
 }
 
-export function listProjects(): ProjectRecord[] {
+export function listProjects(userKey?: string): ProjectRecord[] {
   ensureInitialized();
-  return Array.from(projects.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return Array.from(projects.values())
+    .filter((project) => !userKey || project.userKey === userKey)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 export function findProjectById(projectId: UUID): ProjectRecord | null {
@@ -85,6 +91,12 @@ export function findProjectBySlug(slug: string): ProjectRecord | null {
   return null;
 }
 
+export function userOwnsProjectSlug(userKey: string | undefined, slug: string): boolean {
+  if (!userKey) return true;
+  const project = findProjectBySlug(slug);
+  return Boolean(project && project.userKey === userKey);
+}
+
 export async function createProject(input: {
   name: string;
   slug?: string;
@@ -92,11 +104,12 @@ export async function createProject(input: {
   issueLabel?: string;
   systemPrompt?: string;
   promptPresets?: PromptPresetSet;
+  userKey?: string;
 }): Promise<ProjectRecord> {
   ensureInitialized();
   const now = new Date().toISOString();
   const baseSlug = slugifyName(input.slug ?? input.name);
-  const uniqueSlug = ensureUniqueSlug(baseSlug);
+  const uniqueSlug = ensureUniqueSlug(baseSlug, input.userKey);
   const id = randomUUID();
   const project: ProjectRecord = {
     id,
@@ -108,6 +121,7 @@ export async function createProject(input: {
     createdAt: now,
     updatedAt: now,
     promptPresets: input.promptPresets,
+    userKey: input.userKey,
   };
 
   projects.set(project.id, project);
@@ -124,7 +138,7 @@ export async function updateProject(projectId: UUID, updates: Partial<Omit<Proje
 
   let slug = existing.slug;
   if (updates.slug && updates.slug !== existing.slug) {
-    slug = ensureUniqueSlug(slugifyName(updates.slug));
+    slug = ensureUniqueSlug(slugifyName(updates.slug), existing.userKey);
   }
 
   const updated: ProjectRecord = {

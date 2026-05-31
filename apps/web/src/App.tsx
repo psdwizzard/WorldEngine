@@ -55,6 +55,8 @@ import {
 import { CaptionBox, FontSelector, SpeechBubble } from "./components";
 import "./App.css";
 
+const MANAGED_GEMINI_KEY = import.meta.env.VITE_WORLDENGINE_MANAGED_KEY === "1";
+
 function assetHref(pathOrId: string) {
   const base = apiBaseUrl.replace(/\/$/, "");
   if (!pathOrId) {
@@ -7629,17 +7631,19 @@ function SettingsTab({
       <h2>Workspace Settings</h2>
       <p>Configure credentials, select the active project, and store reusable prompts.</p>
       <form className="form-card" onSubmit={handleSubmit}>
-        <div className="field">
-          <label htmlFor="gemini-key">Gemini API key</label>
-          <input
-            id="gemini-key"
-            type="password"
-            placeholder="sk-..."
-            value={settings.geminiKey}
-            onChange={(event) => updateSetting("geminiKey", event.target.value.trim())}
-            autoComplete="off"
-          />
-        </div>
+        {!MANAGED_GEMINI_KEY && (
+          <div className="field">
+            <label htmlFor="gemini-key">Gemini API key</label>
+            <input
+              id="gemini-key"
+              type="password"
+              placeholder="sk-..."
+              value={settings.geminiKey}
+              onChange={(event) => updateSetting("geminiKey", event.target.value.trim())}
+              autoComplete="off"
+            />
+          </div>
+        )}
         <div className="field">
           <label htmlFor="asset-root">Asset output directory</label>
           <input
@@ -7983,5 +7987,4 @@ function SettingsTab({
 }
 
 export default App;
-
 

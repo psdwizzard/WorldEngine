@@ -1,14 +1,25 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
 import type { EnvConfig } from "./lib/env";
+import { hostedAuth, getHostedUser } from "./middleware/hostedAuth";
 import { registerRoutes } from "./routes";
 import { getAsset } from "./services/assetStore";
+import { userOwnsProjectSlug } from "./stores/projects";
+
+const apiDir = path.dirname(fileURLToPath(import.meta.url));
+const webDistDir = path.resolve(apiDir, "..", "..", "web", "dist");
 
 export function createServer(env: EnvConfig) {
   const app = express();
 
   app.disable("x-powered-by");
-  app.use(cors());
+  if (env.WORLDENGINE_HOSTED_BY_FORGE || env.WORLDENGINE_REQUIRE_AUTH) {
+    app.use(cors({ origin: false }));
+  } else {
+    app.use(cors());
+  }
   app.use(express.json({ limit: env.JSON_LIMIT }));
   app.use(express.urlencoded({ extended: true, limit: env.JSON_LIMIT }));
   app.use((_req, res, next) => {
@@ -21,9 +32,19 @@ export function createServer(env: EnvConfig) {
     res.json({ status: "ok", uptime: process.uptime() });
   });
 
+  app.use(hostedAuth(env));
+
+  app.get("/me", (req, res) => {
+    const user = getHostedUser(req);
+    res.json({ email: user.email, role: user.role });
+  });
+
   app.get("/assets/:assetId", (req, res) => {
     const asset = getAsset(req.params.assetId);
     if (!asset) {
+      return res.status(404).json({ error: "asset_not_found" });
+    }
+    if (!userOwnsProjectSlug(getHostedUser(req).userKey, asset.meta.projectSlug)) {
       return res.status(404).json({ error: "asset_not_found" });
     }
 
@@ -46,6 +67,13 @@ export function createServer(env: EnvConfig) {
   });
 
   registerRoutes(app);
+
+  app.use(express.static(webDistDir));
+  app.get("*", (_req, res, next) => {
+    res.sendFile(path.join(webDistDir, "index.html"), (error) => {
+      if (error) next();
+    });
+  });
 
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error(err);

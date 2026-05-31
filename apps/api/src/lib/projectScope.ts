@@ -1,5 +1,6 @@
 import type { Request } from "express";
 import { DEFAULT_PROJECT_SLUG } from "./constants";
+import { getHostedUser } from "../middleware/hostedAuth";
 import { findProjectById, findProjectBySlug, listProjects } from "../stores/projects";
 
 export function normalizeProjectSlug(slug?: string) {
@@ -8,16 +9,12 @@ export function normalizeProjectSlug(slug?: string) {
   return normalized.length > 0 ? normalized : DEFAULT_PROJECT_SLUG;
 }
 
-function fallbackProjectSlug() {
-  const projects = listProjects();
-  return projects[0]?.slug ?? DEFAULT_PROJECT_SLUG;
-}
-
 export function resolveProjectSlug(req: Request) {
+  const user = getHostedUser(req);
   const headerSlug = req.header("x-project-slug");
   if (headerSlug) {
     const project = findProjectBySlug(normalizeProjectSlug(headerSlug));
-    if (project) {
+    if (project && project.userKey === user.userKey) {
       return project.slug;
     }
   }
@@ -25,7 +22,7 @@ export function resolveProjectSlug(req: Request) {
   const headerId = req.header("x-project-id");
   if (headerId) {
     const project = findProjectById(headerId as string);
-    if (project) {
+    if (project && project.userKey === user.userKey) {
       return project.slug;
     }
   }
@@ -33,10 +30,10 @@ export function resolveProjectSlug(req: Request) {
   const querySlug = typeof req.query.projectSlug === "string" ? req.query.projectSlug : undefined;
   if (querySlug) {
     const project = findProjectBySlug(normalizeProjectSlug(querySlug));
-    if (project) {
+    if (project && project.userKey === user.userKey) {
       return project.slug;
     }
   }
 
-  return fallbackProjectSlug();
+  return listProjects(user.userKey)[0]?.slug ?? `${user.userKey}-${DEFAULT_PROJECT_SLUG}`;
 }

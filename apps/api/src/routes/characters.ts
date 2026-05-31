@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { CharacterAngle, UUID } from "@worldengine/shared";
 import { upload } from "../middleware/upload";
 import { saveAsset, saveAssetBuffer } from "../services/assetStore";
+import { requestGeminiKey } from "../lib/managedKey";
 import { resolveProjectSlug } from "../lib/projectScope";
 import { findProjectBySlug } from "../stores/projects";
 import {
@@ -326,7 +327,7 @@ charactersRouter.post("/generate/slot", async (req, res) => {
 
     // Generate the image
     const result = await generateImage(env, generationRequest, {
-      apiKeyOverride: req.header("x-gemini-key") ?? undefined,
+      apiKeyOverride: requestGeminiKey(req, env),
     });
     const imageBuffer = result.imageBuffer;
     const aiDescription = result.aiDescription;

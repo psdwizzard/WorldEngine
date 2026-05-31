@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import type { PromptPresetSet } from "@worldengine/shared";
+import { getHostedUser } from "../middleware/hostedAuth";
 import { createProject, listProjects, updateProject } from "../stores/projects";
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -99,8 +100,19 @@ function normalizePromptPresets(input?: z.infer<typeof promptPresetSchema>): Pro
 
 export const projectsRouter = Router();
 
-projectsRouter.get("/", (_req, res) => {
-  res.json({ projects: listProjects() });
+projectsRouter.get("/", async (req, res) => {
+  const user = getHostedUser(req);
+  let projects = listProjects(user.userKey);
+  if (projects.length === 0) {
+    const project = await createProject({
+      name: "Workspace",
+      slug: "workspace",
+      description: "Default workspace",
+      userKey: user.userKey,
+    });
+    projects = [project];
+  }
+  res.json({ projects });
 });
 
 projectsRouter.post("/", async (req, res) => {
@@ -115,6 +127,7 @@ projectsRouter.post("/", async (req, res) => {
       ...rest,
       systemPrompt: systemPrompt?.trim() || undefined,
       promptPresets: normalizePromptPresets(promptPresets),
+      userKey: getHostedUser(req).userKey,
     });
     res.status(201).json({ project });
   } catch (error) {
@@ -141,6 +154,10 @@ projectsRouter.patch("/:projectId", async (req, res) => {
 
   try {
     const { promptPresets, systemPrompt, ...rest } = parsed.data;
+    const existing = listProjects(getHostedUser(req).userKey).find((project) => project.id === params.data.projectId);
+    if (!existing) {
+      return res.status(404).json({ error: "project_not_found" });
+    }
     const project = await updateProject(params.data.projectId, {
       ...rest,
       systemPrompt: systemPrompt?.trim() || undefined,

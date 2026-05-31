@@ -18,6 +18,12 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string().min(1).optional(),
   NANO_BANANA_MODEL: z.string().optional(),
   NANO_BANANA_PRO_MODEL: z.string().optional(),
+  WORLDENGINE_HOSTED_BY_FORGE: z.coerce.boolean().default(false),
+  WORLDENGINE_REQUIRE_AUTH: z.coerce.boolean().default(false),
+  WORLDENGINE_PROXY_HMAC_SECRET: z.string().optional(),
+  WORLDENGINE_FOUNDER_EMAIL: z.string().email().optional(),
+  CLOUDFLARE_ACCESS_TEAM_DOMAIN: z.string().optional(),
+  CLOUDFLARE_ACCESS_AUD: z.string().optional(),
 });
 
 export type EnvConfig = z.infer<typeof envSchema> & {
@@ -29,6 +35,10 @@ export function loadEnv(): EnvConfig {
   load({ path: ".env.local", override: false });
   // Load API-specific env placed under apps/api/.env.local
   load({ path: path.join(repoRoot, "apps", "api", ".env.local"), override: false });
+
+  if (process.env.VITEST) {
+    process.env.NODE_ENV = "test";
+  }
 
   const parsed = envSchema.parse(process.env);
 

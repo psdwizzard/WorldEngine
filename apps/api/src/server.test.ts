@@ -17,6 +17,14 @@ const env: EnvConfig = {
   JSON_LIMIT: "10mb",
   DATA_ROOT: testDataRoot,
   GEMINI_API_KEY: undefined,
+  NANO_BANANA_MODEL: undefined,
+  NANO_BANANA_PRO_MODEL: undefined,
+  WORLDENGINE_HOSTED_BY_FORGE: false,
+  WORLDENGINE_REQUIRE_AUTH: false,
+  WORLDENGINE_PROXY_HMAC_SECRET: undefined,
+  WORLDENGINE_FOUNDER_EMAIL: undefined,
+  CLOUDFLARE_ACCESS_TEAM_DOMAIN: undefined,
+  CLOUDFLARE_ACCESS_AUD: undefined,
 };
 
 async function makeApp() {

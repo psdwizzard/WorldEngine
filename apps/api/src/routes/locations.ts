@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { LocationSpot, UUID } from "@worldengine/shared";
 import { upload } from "../middleware/upload";
 import { saveAsset, saveAssetBuffer, getAsset, getAssetBuffer } from "../services/assetStore";
+import { requestGeminiKey } from "../lib/managedKey";
 import { resolveProjectSlug } from "../lib/projectScope";
 import { findProjectBySlug } from "../stores/projects";
 import { ensureLocation, ensureSpot, getLocation, listLocations, upsertLocation } from "../stores/locations";
@@ -113,7 +114,7 @@ locationsRouter.post("/generate-view", async (req, res) => {
         },
       },
       {
-        apiKeyOverride: req.header("x-gemini-key") ?? undefined,
+        apiKeyOverride: requestGeminiKey(req, env),
       },
     );
 
@@ -207,7 +208,7 @@ locationsRouter.post("/generate-from-image", async (req, res) => {
         },
       },
       {
-        apiKeyOverride: req.header("x-gemini-key") ?? undefined,
+        apiKeyOverride: requestGeminiKey(req, env),
       },
     );
 
@@ -331,4 +332,3 @@ locationsRouter.get("/", (req, res) => {
   const projectSlug = resolveProjectSlug(req);
   res.json({ locations: listLocations(projectSlug) });
 });
-

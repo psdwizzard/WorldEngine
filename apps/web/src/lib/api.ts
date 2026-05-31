@@ -31,6 +31,9 @@ function getProtocol(): string {
 }
 
 function buildDefaultApiBaseUrl(): string {
+  if (import.meta.env.VITE_WORLDENGINE_HOSTED === "1") {
+    return "";
+  }
   return `${getProtocol()}//${getDefaultHost()}:${API_PORT}`;
 }
 
@@ -917,4 +920,3 @@ export async function exportPageToPsd(input: {
 }
 
 export { API_BASE_URL as apiBaseUrl };
-

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { loadEnv } from "../lib/env";
 
 const renderAndFetchSchema = z.object({
   panelId: z.string().uuid(),
@@ -25,6 +26,11 @@ export const psRouter = Router();
  * the plugin can place the image without a second request.
  */
 psRouter.post("/render-and-fetch", async (req, res) => {
+  const env = loadEnv();
+  if (env.WORLDENGINE_HOSTED_BY_FORGE || env.WORLDENGINE_REQUIRE_AUTH) {
+    return res.status(404).json({ error: "photoshop_extension_disabled_in_hosted_mode" });
+  }
+
   const parsed = renderAndFetchSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "invalid_payload", issues: parsed.error.flatten() });
