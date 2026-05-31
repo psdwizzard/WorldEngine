@@ -517,11 +517,16 @@ export async function listStoryboardPages(input?: {
   projectSlug?: string;
   issueLabel?: string;
 }): Promise<StoryboardPage[]> {
-  const url = new URL(resolveUrl("/panels/pages"));
+  // In hosted mode VITE_API_BASE_URL is empty and resolveUrl returns a bare
+  // path like "/panels/pages". `new URL()` rejects relative paths without a
+  // base, so build the query string manually instead.
+  const params = new URLSearchParams();
   if (input?.issueLabel) {
-    url.searchParams.set("issueLabel", input.issueLabel);
+    params.set("issueLabel", input.issueLabel);
   }
-  const response = await fetch(url.toString(), {
+  const qs = params.toString();
+  const url = resolveUrl("/panels/pages") + (qs ? `?${qs}` : "");
+  const response = await fetch(url, {
     headers: {
       Accept: "application/json",
       ...authHeader({ geminiKey: input?.geminiKey, projectSlug: input?.projectSlug }),
